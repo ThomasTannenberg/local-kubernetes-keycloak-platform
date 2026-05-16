@@ -24,9 +24,7 @@ Mein System ist älter und damals war RAM noch nicht so teuer!
 ## Konfiguration anpassen
 
 Die VM-Liste steht oben im Deploy-Skript im Array `VMS`. Format:
-`name|ip|mac|memory_mb|vcpus|disk_gb`. Eine VM hinzufügen heißt: eine
-Zeile ergänzen, Skript erneut laufen lassen (idempotent, vorhandene VMs
-werden übersprungen).
+`name|ip|mac|memory_mb|vcpus|disk_gb`. 
 
 User-Name (`k3sadmin`) ist in `SSH_USER` oben gepflegt.
 
