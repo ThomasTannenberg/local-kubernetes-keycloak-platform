@@ -13,10 +13,3 @@ cluster-create:
 cluster-delete:
 	cd cluster/ansible && ansible-playbook uninstall.yml
 
-install:
-	./scripts/install-all.sh
-
-validate:
-	./scripts/validate.sh
-
-cleanup: cluster-delete

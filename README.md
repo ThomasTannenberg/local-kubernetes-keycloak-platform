@@ -41,3 +41,7 @@ kubectl version --client
 helm version
 virsh --version
 virt-install --version
+make  --version
+kubectl --version
+helm version
+
