@@ -31,6 +31,17 @@ Die lokale Umgebung besteht aus sieben VMs:
 | k3s-agent-2 | 192.168.122.22 | Worker |
 | k3s-agent-3 | 192.168.122.23 | Worker |
 
+### Arichtektur anpassen:
+1. /cluster/libvrit/01-deploy-cluster-dloudimg.sh anpassen:
+
+Die VM-Liste steht oben im Deploy Skript im Array `VMS`. Format:
+`name|ip|mac|memory_mb|vcpus|disk_gb`. 
+Eine VM hinzufügen heißt: eine
+Zeile ergänzen, analog entfernen. Auch andere Parameter können so angepasst werden.
+
+2. /cluster/ansible/inventory.ini
+anpassen
+
 ## Voraussetzungen
 
 Benötigte Tools auf dem Hostsystem:

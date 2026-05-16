@@ -16,9 +16,11 @@ CLOUD_IMG_LOCAL="$HOME/Downloads/${CLOUD_IMG_NAME}"
 CLOUD_IMG_BASE="/var/lib/libvirt/boot/${CLOUD_IMG_NAME}"
 SSH_KEY_PUB="${SSH_KEY_PUB:-$HOME/.ssh/id_ed25519.pub}"
 SSH_KEY_PRIV="${SSH_KEY_PRIV:-$HOME/.ssh/id_ed25519}"
-CLOUD_INIT_BASE="$HOME/Development/cloud-init"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLOUD_INIT_BASE="${CLOUD_INIT_BASE:-$REPO_ROOT/tmp/cloud-init}"
 
-# Wenn STANDALONE_DISKS=1, werden Disks per cp + resize erzeugt statt Klon. Langsamer aber Disks sind unabhängig vom Cloud-Image
+# Wenn STANDALONE_DISKS=1, werden Disks per cp + resize erzeugt statt Klon. 
+# Langsamer aber Disks sind unabhängig vom Cloud-Image
 STANDALONE_DISKS="${STANDALONE_DISKS:-0}"
 
 VMS=(
@@ -49,7 +51,7 @@ check_prereqs() {
   virsh -c qemu:///system list >/dev/null 2>&1 || die "Kein libvirt-Zugriff."
 
   if [ -z "${PASSWORD_HASH:-}" ]; then
-    log "PASSWORD_HASH nicht gesetzt — interaktiv erzeugen (zweimal eingeben):"
+    log "Admin Passwort nicht gesetzt — interaktiv erzeugen (zweimal eingeben):"
     PASSWORD_HASH="$(openssl passwd -6)"
     export PASSWORD_HASH
   fi
@@ -58,7 +60,7 @@ check_prereqs() {
 ensure_cloud_image() {
   log "Cloud-Image bereitstellen..."
 
-  # Reste von früheren Fehlversuchen aufräumen
+  # Reste von früheren Fehlversuchen aufräumen. Was notwendig am Anfang, kann eigentlich raus. Aber schadet auch nicht.
   if [ -f "$CLOUD_IMG_LOCAL" ] && [ ! -s "$CLOUD_IMG_LOCAL" ]; then
     log "    Verwerfe leere/abgebrochene Datei: $CLOUD_IMG_LOCAL"
     rm -f "$CLOUD_IMG_LOCAL"
@@ -90,7 +92,7 @@ vm_exists() {
 
 create_disk() {
   # Erzeugt /var/lib/libvirt/images/<name>.qcow2 in Ziel-Größe.
-  # Standard: qcow2 mit Cloud-Image als Backing-File (sehr schnell, klein).
+  # Standard: qcow2 mit Cloud-Image als Backing-File (sehr schnell).
   # STANDALONE_DISKS=1: copy + resize (Disk unabhängig vom Base-Image).
   local vm_name="$1"
   local disk_gb="$2"
