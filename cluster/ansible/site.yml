@@ -422,5 +422,6 @@
           - "{{ playbook_dir }}/k3s.yaml"
           - "Nutzung:"
           - "export KUBECONFIG={{ playbook_dir }}/k3s.yaml"
+          - "source ~/.bashrc"
           - "kubectl get nodes -o wide"
           - "helm list -A"
