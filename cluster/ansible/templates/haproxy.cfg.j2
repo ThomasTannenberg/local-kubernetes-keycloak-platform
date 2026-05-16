@@ -1,0 +1,23 @@
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    daemon
+
+defaults
+    log global
+    mode tcp
+    option tcplog
+    timeout connect 5s
+    timeout client  10m
+    timeout server  10m
+
+frontend k3s_api
+    bind 0.0.0.0:{{ api_port }}
+    default_backend k3s_servers
+
+backend k3s_servers
+    balance roundrobin
+    option tcp-check
+{% for host in (groups['k3s_init'] + groups['k3s_servers']) %}
+    server {{ host }} {{ hostvars[host].ansible_host }}:{{ api_port }} check
+{% endfor %}

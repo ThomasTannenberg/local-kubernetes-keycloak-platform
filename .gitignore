@@ -1,0 +1,34 @@
+# Temporäre Dateien
+tmp/
+temp/
+*.tmp
+*.log
+
+# K3s und Kubernetes generierte oder sensible Dateien
+.k3s-bootstrap-token
+**/.k3s-bootstrap-token
+k3s.yaml
+**/k3s.yaml
+*.kubeconfig
+kubeconfig*
+
+# Secrets und lokale Umgebungen
+.env
+.env.*
+!.env.example
+*secret*.yaml
+!*secrets-example.yaml
+
+# Ansible
+*.retry
+.ansible/
+
+# Editor und OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python Cache
+__pycache__/
+*.pyc
