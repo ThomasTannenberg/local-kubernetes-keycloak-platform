@@ -1,10 +1,18 @@
 postgresql:
   architecture: standalone
 
+  image:
+    registry: registry-1.docker.io
+    repository: bitnami/postgresql
+    tag: latest
+
   auth:
     username: keycloak
     database: keycloak
     existingSecret: keycloak-postgresql-auth
+    secretKeys:
+      userPasswordKey: password
+      adminPasswordKey: postgres-password
 
   primary:
     persistence:

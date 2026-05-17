@@ -35,7 +35,7 @@ Verwendete Versionen:
 # 1.2 Cluster-Konfiguration
 ## Wie wird das Cluster erstellt?
 
-Das Cluster muss wird in zwei Hauptstufen erstellt.
+Das Cluster wird in zwei Hauptstufen erstellt.
 
 ### Erstellen der VMs
 Dafür werden mit scripts virtuelle Maschinen auf KVM/libvrit Basis erstellt. Als Image verwende ich ein Ubuntu Cloud Image.
@@ -144,3 +144,10 @@ CoreDNS stellt die interne DNS Auflösung des Clusters bereit.
 Der local-path-provisioner und metrics-server sind aktiv. 
 
 Die Namespaces für Ingress, Longhorn, cert-manager und Keycloak werden später durch die Installationsschritte der jeweiligen Komponenten erstellt.
+
+
+
+
+
+
+
