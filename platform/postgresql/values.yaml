@@ -1,0 +1,21 @@
+postgresql:
+  architecture: standalone
+
+  auth:
+    username: keycloak
+    database: keycloak
+    existingSecret: keycloak-postgresql-auth
+
+  primary:
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 10Gi
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi

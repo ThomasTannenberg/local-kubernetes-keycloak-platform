@@ -18,6 +18,7 @@ kubeconfig*
 !.env.example
 *secret*.yaml
 !*secrets-example.yaml
+.secrets.env
 
 # Ansible
 *.retry
@@ -32,3 +33,6 @@ Thumbs.db
 # Python Cache
 __pycache__/
 *.pyc
+
+# charts
+platform/*/charts/*.tgz

@@ -1,0 +1,14 @@
+longhorn:
+  persistence:
+    defaultClass: false # local bleibt default
+    defaultClassReplicaCount: 2 # Dokumentation empfiehlt 3, aber das ist für das lokale Setup zu viel imo
+    reclaimPolicy: Retain # VMs sind icht dauerhaft online, verhindert das Löschen von Daten bei einem Neustart der VMs
+
+  defaultSettings:
+    defaultDataPath: /var/lib/longhorn
+    defaultReplicaCount: 2
+    storageMinimalAvailablePercentage: 25 # es sollte genügen freier Speicher bleiben
+    storageOverProvisioningPercentage: 100 # vielleicht unnötig, aber host speicher is begrenzt
+    replicaSoftAntiAffinity: false # bei 2 Replikas ist das nicht so wichtig, da es nur 2 Möglichkeiten gibt, aber bei mehr Replikas könnte es sinnvoll sein, damit die Replikas auf verschiedenen Nodes liegen
+    replicaAutoBalance: best-effort # kann helfen besser zu verteilen, aber bei 2 Replikas auch nciht so wichtig
+    orphanAutoDeletion: false # verhindert das automatische Löschen von Volumes, die nicht mehr an einen Pod gebunden sind.. vielleicht bruache ich es im lokalen setup zum debuggen

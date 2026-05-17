@@ -3,6 +3,11 @@
 lb_ip: 192.168.122.10
 api_port: 6443
 
+# NodePorts des Traefik Ingress Controllers.
+# HAProxy leitet später Port 80 und 443 auf diese NodePorts der Agent Nodes weiter.
+traefik_http_port: 30080
+traefik_https_port: 30443
+
 # Cluster-Token. Wird per ENV-Variable übergeben:
 #   export K3S_TOKEN="$(openssl rand -hex 32)"
 # Niemals committen!

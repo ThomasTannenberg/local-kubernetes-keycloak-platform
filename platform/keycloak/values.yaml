@@ -1,0 +1,50 @@
+keycloak:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/keycloak
+    tag: 26.3.3-debian-12-r0
+
+  auth:
+    adminUser: admin
+    existingSecret: keycloak-admin
+    passwordSecretKey: admin-password
+
+  production: true
+  proxyHeaders: xforwarded
+  hostnameStrict: false
+
+  postgresql:
+    enabled: false
+
+  externalDatabase:
+    host: postgresql.postgresql.svc.cluster.local
+    port: 5432
+    user: keycloak
+    database: keycloak
+    existingSecret: keycloak-database
+    existingSecretPasswordKey: password
+
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: keycloak.local.example
+    path: /
+    pathType: Prefix
+    servicePort: http
+    tls: true
+
+    annotations:
+      cert-manager.io/cluster-issuer: selfsigned-cluster-issuer
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1500m
+      memory: 2Gi
+
+

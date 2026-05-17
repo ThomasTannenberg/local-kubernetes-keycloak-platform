@@ -132,8 +132,15 @@ kube-system   coredns-c4dbffb5f-v42st                   1/1     Running   2 (85m
 kube-system   local-path-provisioner-5c4dc5d66d-jlhcn   1/1     Running   2 (85m ago)   19h
 kube-system   metrics-server-786d997795-8sh26           1/1     Running   2 (85m ago)   19h
 
+5. kubectl get storageclasses
+
+NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false   
+
+
 Die Control Planes sind über dne HAProxy LoadBalancer erreichbar.
 Alle sechs Nodes sind 'READY' und die Rollenzuweisungen sind korrekt gesetzt.
 CoreDNS stellt die interne DNS Auflösung des Clusters bereit.
+Der local-path-provisioner und metrics-server sind aktiv. 
 
-Die Namespaces für Ingress, cert-manager und Keycloak werden später durch die Installationsschritte der jeweiligen Komponenten erstellt.
+Die Namespaces für Ingress, Longhorn, cert-manager und Keycloak werden später durch die Installationsschritte der jeweiligen Komponenten erstellt.

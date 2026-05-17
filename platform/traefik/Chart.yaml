@@ -1,0 +1,10 @@
+apiVersion: v2
+name: traefik-wrapper
+description: Wrapper Chart for Traefik Ingress Controller
+type: application
+version: 0.1.0
+
+dependencies:
+  - name: traefik
+    version: 40.2.0
+    repository: https://traefik.github.io/charts
