@@ -1,0 +1,7 @@
+defaultNamespace: longhorn-system
+
+dependsOn:
+  - name: local-keycloak-platform-platform-cert-manager
+
+helm:
+  releaseName: longhorn

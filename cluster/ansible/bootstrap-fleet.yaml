@@ -1,0 +1,151 @@
+---
+- name: Bootstrap Fleet after K3s cluster creation
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/k3s.yaml"
+
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path }}"
+
+  tasks:
+    - name: Prüfen ob Kubeconfig vorhanden ist
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_file
+
+    - name: Abbrechen wenn Kubeconfig fehlt
+      assert:
+        that:
+          - kubeconfig_file.stat.exists
+        fail_msg: "Kubeconfig fehlt. Bitte zuerst cluster-create ausführen."
+
+    - name: Kubernetes API prüfen
+      command: kubectl get nodes
+      changed_when: false
+
+    - name: Fleet Helm Repository hinzufügen
+      command: helm repo add fleet https://rancher.github.io/fleet-helm-charts/
+      register: fleet_repo_add
+      changed_when: "'has been added' in fleet_repo_add.stdout"
+      failed_when:
+        - fleet_repo_add.rc != 0
+        - "'already exists' not in fleet_repo_add.stderr"
+
+    - name: Helm Repositories aktualisieren
+      command: helm repo update
+      changed_when: false
+
+    - name: Fleet CRDs installieren
+      command: >
+        helm upgrade --install fleet-crd fleet/fleet-crd
+        --namespace cattle-fleet-system
+        --create-namespace
+        --wait
+
+    - name: Fleet Controller installieren
+      command: >
+        helm upgrade --install fleet fleet/fleet
+        --namespace cattle-fleet-system
+        --create-namespace
+        --wait
+
+    - name: Warten bis Fleet Controller läuft
+      command: >
+        kubectl -n cattle-fleet-system wait
+        --for=condition=Ready pod
+        -l app=fleet-controller
+        --timeout=300s
+      changed_when: false
+
+    - name: fleet-local Namespace erstellen
+      command: kubectl create namespace fleet-local --dry-run=client -o yaml
+      register: fleet_local_namespace
+      changed_when: false
+
+    - name: fleet-local Namespace anwenden
+      command: kubectl apply -f -
+      args:
+        stdin: "{{ fleet_local_namespace.stdout }}"
+    
+        - name: Namespace postgresql erstellen
+      command: kubectl create namespace postgresql --dry-run=client -o yaml
+      register: postgresql_namespace
+      changed_when: false
+
+    - name: Namespace postgresql anwenden
+      command: kubectl apply -f -
+      args:
+        stdin: "{{ postgresql_namespace.stdout }}"
+
+    - name: Namespace keycloak erstellen
+      command: kubectl create namespace keycloak --dry-run=client -o yaml
+      register: keycloak_namespace
+      changed_when: false
+
+    - name: Namespace keycloak anwenden
+      command: kubectl apply -f -
+      args:
+        stdin: "{{ keycloak_namespace.stdout }}"
+
+    - name: PostgreSQL Secret erzeugen
+      command: >
+        kubectl -n postgresql create secret generic keycloak-postgresql-auth
+        --from-literal=password={{ keycloak_db_password }}
+        --from-literal=postgres-password={{ postgres_admin_password }}
+        --dry-run=client -o yaml
+      register: postgresql_secret
+      changed_when: false
+      no_log: true
+
+    - name: PostgreSQL Secret anwenden
+      command: kubectl apply -f -
+      args:
+        stdin: "{{ postgresql_secret.stdout }}"
+      no_log: true
+
+    - name: Keycloak Admin Secret erzeugen
+      command: >
+        kubectl -n keycloak create secret generic keycloak-admin
+        --from-literal=admin-password={{ keycloak_admin_password }}
+        --dry-run=client -o yaml
+      register: keycloak_admin_secret
+      changed_when: false
+      no_log: true
+
+    - name: Keycloak Admin Secret anwenden
+      command: kubectl apply -f -
+      args:
+        stdin: "{{ keycloak_admin_secret.stdout }}"
+      no_log: true
+
+    - name: Keycloak Datenbank Secret erzeugen
+      command: >
+        kubectl -n keycloak create secret generic keycloak-database
+        --from-literal=password={{ keycloak_db_password }}
+        --dry-run=client -o yaml
+      register: keycloak_database_secret
+      changed_when: false
+      no_log: true
+
+    - name: Keycloak Datenbank Secret anwenden
+      command: kubectl apply -f -
+      args:
+        stdin: "{{ keycloak_database_secret.stdout }}"
+      no_log: true
+
+    - name: Fleet GitRepo anwenden
+      command: kubectl apply -f ../../fleet/gitrepo.yaml
+      args:
+        chdir: "{{ playbook_dir }}"
+
+    - name: Fleet Status anzeigen
+      command: kubectl get gitrepo,bundles,bundledeployments -A
+      register: fleet_status
+      changed_when: false
+
+    - name: Fleet Status ausgeben
+      debug:
+        var: fleet_status.stdout_lines

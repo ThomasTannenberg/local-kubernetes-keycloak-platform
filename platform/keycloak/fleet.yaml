@@ -1,0 +1,8 @@
+defaultNamespace: keycloak
+
+dependsOn:
+  - name: local-keycloak-platform-platform-postgresql
+  - name: local-keycloak-platform-platform-traefik
+
+helm:
+  releaseName: keycloak

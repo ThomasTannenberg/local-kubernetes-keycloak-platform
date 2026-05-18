@@ -11,18 +11,34 @@ k3s.yaml
 **/k3s.yaml
 *.kubeconfig
 kubeconfig*
+admin.conf
 
 # Secrets und lokale Umgebungen
 .env
 .env.*
 !.env.example
 *secret*.yaml
+*secrets*.yaml
 !*secrets-example.yaml
+!*secret-example.yaml
 .secrets.env
+cluster/ansible/group_vars/secrets.yml
+cluster/ansible/group_vars/*secrets*.yml
+cluster/ansible/group_vars/*secret*.yml
 
 # Ansible
 *.retry
 .ansible/
+cluster/ansible/.k3s-bootstrap-token
+
+# Helm
+platform/*/charts/
+platform/*/Chart.lock
+*.tgz
+
+# Fleet lokal generierte Dateien
+fleet/tmp/
+fleet/*.local.yaml
 
 # Editor und OS
 .vscode/
@@ -33,6 +49,3 @@ Thumbs.db
 # Python Cache
 __pycache__/
 *.pyc
-
-# charts
-platform/*/charts/*.tgz

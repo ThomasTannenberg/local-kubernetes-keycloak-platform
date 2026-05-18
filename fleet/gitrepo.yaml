@@ -1,0 +1,14 @@
+apiVersion: fleet.cattle.io/v1alpha1
+kind: GitRepo
+metadata:
+  name: local-keycloak-platform
+  namespace: fleet-local
+spec:
+  repo: https://github.com/ThomasTannenberg/local-kubernetes-keycloak-platform.git
+  branch: main
+  paths:
+    - platform/cert-manager
+    - platform/longhorn
+    - platform/postgresql
+    - platform/traefik
+    - platform/keycloak

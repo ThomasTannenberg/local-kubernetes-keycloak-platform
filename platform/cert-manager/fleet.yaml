@@ -1,0 +1,4 @@
+defaultNamespace: cert-manager
+
+helm:
+  releaseName: cert-manager

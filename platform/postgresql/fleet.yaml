@@ -1,0 +1,7 @@
+defaultNamespace: postgresql
+
+dependsOn:
+  - name: local-keycloak-platform-platform-longhorn
+
+helm:
+  releaseName: postgresql
