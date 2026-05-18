@@ -7,45 +7,66 @@
   vars:
     kubeconfig_path: "{{ playbook_dir }}/k3s.yaml"
     secrets_file_path: "{{ playbook_dir }}/group_vars/secrets.yml"
-    secrets_example_file_path: "{{ playbook_dir }}/group_vars/secrets-example.yml"
+    generated_password_length: 32
 
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
 
   pre_tasks:
-    - name: Prüfen ob Secret Vorlage vorhanden ist
-      stat:
-        path: "{{ secrets_example_file_path }}"
-      register: secrets_example_file
-
-    - name: Abbrechen wenn Secret Vorlage fehlt
-      assert:
-        that:
-          - secrets_example_file.stat.exists
-        fail_msg: >
-          Die Datei cluster/ansible/group_vars/secrets-example.yml fehlt.
-          Bitte zuerst die Secret Vorlage anlegen.
-
     - name: Prüfen ob lokale Secret Datei vorhanden ist
       stat:
         path: "{{ secrets_file_path }}"
       register: secrets_file
 
-    - name: Lokale Secret Datei aus Beispiel erstellen wenn sie fehlt
+    - name: Vorhandene Secret Datei lesen
+      slurp:
+        path: "{{ secrets_file_path }}"
+      register: existing_secrets_file
+      when: secrets_file.stat.exists
+      no_log: true
+
+    - name: Prüfen ob vorhandene Secret Datei noch Platzhalter enthält
+      set_fact:
+        secrets_file_contains_placeholders: >-
+          {{
+            secrets_file.stat.exists and
+            (
+              'keycloak-db-password' in (existing_secrets_file.content | b64decode) or
+              'postgres-admin-password' in (existing_secrets_file.content | b64decode) or
+              'keycloak-admin-password' in (existing_secrets_file.content | b64decode)
+            )
+          }}
+      when: secrets_file.stat.exists
+      no_log: true
+
+    - name: Secret Platzhalter Status setzen wenn Datei fehlt
+      set_fact:
+        secrets_file_contains_placeholders: false
+      when: not secrets_file.stat.exists
+      no_log: true
+
+    - name: Zufällige Passwörter generieren
+      set_fact:
+        generated_keycloak_db_password: "{{ lookup('password', '/dev/null length=' ~ generated_password_length ~ ' chars=ascii_letters,digits') }}"
+        generated_postgres_admin_password: "{{ lookup('password', '/dev/null length=' ~ generated_password_length ~ ' chars=ascii_letters,digits') }}"
+        generated_keycloak_admin_password: "{{ lookup('password', '/dev/null length=' ~ generated_password_length ~ ' chars=ascii_letters,digits') }}"
+      when: not secrets_file.stat.exists or secrets_file_contains_placeholders | bool
+      no_log: true
+
+    - name: Lokale Secret Datei mit generierten Passwörtern erstellen oder ersetzen
       copy:
-        src: "{{ secrets_example_file_path }}"
         dest: "{{ secrets_file_path }}"
         mode: "0600"
-        force: no
-      when: not secrets_file.stat.exists
+        content: |
+          ---
+          # Diese Datei wurde automatisch von bootstrap-fleet.yml erzeugt.
+          # Sie enthält lokale Passwörter und darf nicht nach Git committed werden.
 
-    - name: Abbrechen wenn Secret Datei neu erstellt wurde
-      fail:
-        msg: >
-          Die Datei cluster/ansible/group_vars/secrets.yml wurde aus der Vorlage erstellt.
-          Bitte dort echte Passwörter eintragen und danach das Playbook erneut starten:
-          ansible-playbook bootstrap-fleet.yml
-      when: not secrets_file.stat.exists
+          keycloak_db_password: "{{ generated_keycloak_db_password }}"
+          postgres_admin_password: "{{ generated_postgres_admin_password }}"
+          keycloak_admin_password: "{{ generated_keycloak_admin_password }}"
+      when: not secrets_file.stat.exists or secrets_file_contains_placeholders | bool
+      no_log: true
 
     - name: Lokale Secret Variablen laden
       include_vars:
@@ -73,12 +94,7 @@
           - keycloak_db_password | length > 0
           - postgres_admin_password | length > 0
           - keycloak_admin_password | length > 0
-          - keycloak_db_password != "change-me-keycloak-db-password"
-          - postgres_admin_password != "change-me-postgres-admin-password"
-          - keycloak_admin_password != "change-me-keycloak-admin-password"
-        fail_msg: >
-          Bitte echte Passwörter in cluster/ansible/group_vars/secrets.yml eintragen.
-          Die Platzhalter aus der Vorlage dürfen nicht verwendet werden.
+        fail_msg: "Secret Variablen konnten nicht geladen werden."
       no_log: true
 
     - name: Kubernetes API prüfen
