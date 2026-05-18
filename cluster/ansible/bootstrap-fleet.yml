@@ -6,9 +6,51 @@
 
   vars:
     kubeconfig_path: "{{ playbook_dir }}/k3s.yaml"
+    secrets_file_path: "{{ playbook_dir }}/group_vars/secrets.yml"
+    secrets_example_file_path: "{{ playbook_dir }}/group_vars/secrets-example.yml"
 
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
+
+  pre_tasks:
+    - name: Prüfen ob Secret Vorlage vorhanden ist
+      stat:
+        path: "{{ secrets_example_file_path }}"
+      register: secrets_example_file
+
+    - name: Abbrechen wenn Secret Vorlage fehlt
+      assert:
+        that:
+          - secrets_example_file.stat.exists
+        fail_msg: >
+          Die Datei cluster/ansible/group_vars/secrets-example.yml fehlt.
+          Bitte zuerst die Secret Vorlage anlegen.
+
+    - name: Prüfen ob lokale Secret Datei vorhanden ist
+      stat:
+        path: "{{ secrets_file_path }}"
+      register: secrets_file
+
+    - name: Lokale Secret Datei aus Beispiel erstellen wenn sie fehlt
+      copy:
+        src: "{{ secrets_example_file_path }}"
+        dest: "{{ secrets_file_path }}"
+        mode: "0600"
+        force: no
+      when: not secrets_file.stat.exists
+
+    - name: Abbrechen wenn Secret Datei neu erstellt wurde
+      fail:
+        msg: >
+          Die Datei cluster/ansible/group_vars/secrets.yml wurde aus der Vorlage erstellt.
+          Bitte dort echte Passwörter eintragen und danach das Playbook erneut starten:
+          ansible-playbook bootstrap-fleet.yml
+      when: not secrets_file.stat.exists
+
+    - name: Lokale Secret Variablen laden
+      include_vars:
+        file: "{{ secrets_file_path }}"
+      no_log: true
 
   tasks:
     - name: Prüfen ob Kubeconfig vorhanden ist
@@ -22,8 +64,29 @@
           - kubeconfig_file.stat.exists
         fail_msg: "Kubeconfig fehlt. Bitte zuerst cluster-create ausführen."
 
+    - name: Prüfen ob Secret Variablen gesetzt sind
+      assert:
+        that:
+          - keycloak_db_password is defined
+          - postgres_admin_password is defined
+          - keycloak_admin_password is defined
+          - keycloak_db_password | length > 0
+          - postgres_admin_password | length > 0
+          - keycloak_admin_password | length > 0
+          - keycloak_db_password != "change-me-keycloak-db-password"
+          - postgres_admin_password != "change-me-postgres-admin-password"
+          - keycloak_admin_password != "change-me-keycloak-admin-password"
+        fail_msg: >
+          Bitte echte Passwörter in cluster/ansible/group_vars/secrets.yml eintragen.
+          Die Platzhalter aus der Vorlage dürfen nicht verwendet werden.
+      no_log: true
+
     - name: Kubernetes API prüfen
       command: kubectl get nodes
+      changed_when: false
+
+    - name: Helm prüfen
+      command: helm version
       changed_when: false
 
     - name: Fleet Helm Repository hinzufügen
@@ -44,6 +107,7 @@
         --namespace cattle-fleet-system
         --create-namespace
         --wait
+      changed_when: true
 
     - name: Fleet Controller installieren
       command: >
@@ -51,6 +115,7 @@
         --namespace cattle-fleet-system
         --create-namespace
         --wait
+      changed_when: true
 
     - name: Warten bis Fleet Controller läuft
       command: >
@@ -69,8 +134,8 @@
       command: kubectl apply -f -
       args:
         stdin: "{{ fleet_local_namespace.stdout }}"
-    
-        - name: Namespace postgresql erstellen
+
+    - name: Namespace postgresql erstellen
       command: kubectl create namespace postgresql --dry-run=client -o yaml
       register: postgresql_namespace
       changed_when: false
@@ -93,8 +158,8 @@
     - name: PostgreSQL Secret erzeugen
       command: >
         kubectl -n postgresql create secret generic keycloak-postgresql-auth
-        --from-literal=password={{ keycloak_db_password }}
-        --from-literal=postgres-password={{ postgres_admin_password }}
+        --from-literal=password={{ keycloak_db_password | quote }}
+        --from-literal=postgres-password={{ postgres_admin_password | quote }}
         --dry-run=client -o yaml
       register: postgresql_secret
       changed_when: false
@@ -109,7 +174,7 @@
     - name: Keycloak Admin Secret erzeugen
       command: >
         kubectl -n keycloak create secret generic keycloak-admin
-        --from-literal=admin-password={{ keycloak_admin_password }}
+        --from-literal=admin-password={{ keycloak_admin_password | quote }}
         --dry-run=client -o yaml
       register: keycloak_admin_secret
       changed_when: false
@@ -124,7 +189,7 @@
     - name: Keycloak Datenbank Secret erzeugen
       command: >
         kubectl -n keycloak create secret generic keycloak-database
-        --from-literal=password={{ keycloak_db_password }}
+        --from-literal=password={{ keycloak_db_password | quote }}
         --dry-run=client -o yaml
       register: keycloak_database_secret
       changed_when: false

@@ -19,12 +19,17 @@ admin.conf
 !.env.example
 *secret*.yaml
 *secrets*.yaml
+*secret*.yml
+*secrets*.yml
 !*secrets-example.yaml
 !*secret-example.yaml
+!*secrets-example.yml
+!*secret-example.yml
 .secrets.env
 cluster/ansible/group_vars/secrets.yml
 cluster/ansible/group_vars/*secrets*.yml
 cluster/ansible/group_vars/*secret*.yml
+!cluster/ansible/group_vars/secrets-example.yml
 
 # Ansible
 *.retry
