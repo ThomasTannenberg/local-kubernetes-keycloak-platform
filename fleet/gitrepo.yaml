@@ -8,6 +8,7 @@ spec:
   branch: main
   paths:
     - platform/cert-manager
+    - platform/cert-manager-issuer
     - platform/longhorn
     - platform/postgresql
     - platform/traefik

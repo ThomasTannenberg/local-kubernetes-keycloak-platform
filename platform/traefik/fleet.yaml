@@ -1,7 +1,7 @@
 defaultNamespace: traefik
 
 dependsOn:
-  - name: local-keycloak-platform-platform-cert-manager
+  - name: local-keycloak-platform-platform-cert-manager-issuer
 
 helm:
   releaseName: traefik

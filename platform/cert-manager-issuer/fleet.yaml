@@ -1,0 +1,4 @@
+defaultNamespace: cert-manager
+
+dependsOn:
+  - name: local-keycloak-platform-platform-cert-manager
