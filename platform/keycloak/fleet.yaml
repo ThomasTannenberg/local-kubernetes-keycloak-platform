@@ -2,6 +2,9 @@ defaultNamespace: keycloak
 
 dependsOn:
   - name: local-keycloak-platform-platform-postgresql
+    acceptedStates:
+      - Ready
+      - Modified
   - name: local-keycloak-platform-platform-traefik
 
 helm:
