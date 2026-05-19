@@ -535,11 +535,536 @@ primary:
     storageClass: longhorn
     size: 10Gi
 
+Allese Andere läuft auf local-path, was für dieses Setup ausreichen ist meiner Meinung nach.
 
 
+Die Longhorn einstellungen über die values sehen so aus:
+
+longhorn:
+  persistence:
+    defaultClass: false
+    defaultClassReplicaCount: 2
+    reclaimPolicy: Retain
+
+  defaultSettings:
+    defaultDataPath: /var/lib/longhorn
+    defaultReplicaCount: 2
+    storageMinimalAvailablePercentage: 25
+    storageOverProvisioningPercentage: 100
+    replicaSoftAntiAffinity: false
+    replicaAutoBalance: best-effort
+    orphanAutoDeletion: false
+
+Drei replicas wären natürlich besser, in einer produktiv Umgebung. Aber in diesem lokal Lab halte ich zwei für ausreichend.
+Retain habe ich genommen, damit PVCs nicht gelöscht werden wenn ein PVC enfernt wird. 
+Kann das debugging etwas erleichtern, und da die VMs nicht dauerhaft "on" sind halte ich es für sinvoll.
+
+### PSQL
+
+Die Nutzung von Longhorn in PostgresSQL wird in der values definiert.
+
+  primary:
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 10Gi
+
+Keycloak selbst muss nicht Longhorn nutzen, alle Daten sind in PSQL. der Keycloak Pod selbst kann so gelöscht und neu erstellt werden, ohne dass es zu Problemen kommt. 
+
+# 1.6 Kubernetes secrets und sensible Daten
 
 
+Admin Zugangsdaten, Datenbankpasswörter und TLS Schlüssel werden nicht in Git oder in der Dokumentation abgelegt.
+
+Allgemein werden Secrets auf zwei Arten erzeugt:
+
+1. Automatisch durch Kubernetes, Helm oder die Komponenten
+2. Durch das Ansible Playbook bootstrap-fleet.yml für PostgreSQL und Keycloak
+
+Die lokal, zur runtime erzeugten Passwörter liegen nur in der lokalen Datei:
+
+cluster/ansible/group_vars/secrets.yml
+Diese Datei wird über .gitignore ausgeschlossen und nicht hochgeladen.
+
+## Verwendete Secrets
+
+Prüfung mit kubectl get secrets -A -o wide
+
+### PSQL Secret
 
 
+kubectl get secrets -n postgresql 
+
+NAME                               TYPE                 DATA   AGE
+keycloak-postgresql-auth           Opaque               2      24h
 
 
+enthält die beiden Werte:
+- postgres-password --> PSQL Admin Password
+- password --> Keycloak DB User
+
+Prüfen mit:
+- kubectl get secret keycloak-postgresql-auth -n postgresql
+- kubectl describe secret keycloak-postgresql-auth -n postgresql
+
+Auslesen des Passwords für den Keycloak User für die PSQL-DB:
+
+kubectl get secret keycloak-postgresql-auth -n postgresql \
+  -o jsonpath="{.data.password}" | base64 -d; echo
+
+### Keycloak Secrets
+
+kubectl get secrets -n keycloak
+
+NAME                             TYPE                 DATA   AGE
+keycloak-admin                   Opaque               1      24h
+keycloak-database                Opaque               1      24h
+keycloak.local.example-tls       kubernetes.io/tls    3      24h
+
+prüfen mit (z.b.):
+kubectl get secret keycloak-admin -n keycloak
+kubectl describe secret keycloak-admin -n keycloak
+
+Admin Password auslesen mit:
+kubectl get secret keycloak-admin -n keycloak \
+  -o jsonpath="{.data.admin-password}" | base64 -d; echo
+
+Analog mit dem keycloak-database Secret.
+Dieses Secret muss doppelt vorhanden sein, einmal im Postgresql Namespace und im Keycloak Namespace, da Kubernetes Secrets nicht in unterschiedlichen namespaces funktionieren.
+Bzw. es keine Zugriff außerhalb des jeweiligen Namespaces gibt.
+
+Das TLS secret wurde durch cert-manager erstellt und enthält das zertifikat für den HTTPS key.
+
+#### Was erstellt welches Secret
+
+keycloak-postgresql-auth --> Ansible 
+
+keycloak-admin --> Ansible
+
+keycloak-database --> Ansible
+
+keycloak.local.example-tls --> cert-manager
+
+Helm Secrets --> Helm
+
+Fleet Secrets --> Fleet
+
+Node Secrets --> K3s
+
+##### Anmerkung
+Für dieses Setup ist das ausschließen der Secrets nach dem erzeugen ausreichend.
+In meiner Produktiv Umgebung nutze ich dazu Sealed Secrets. 
+Damit liegen die Secrets zwar in Git, aber dort verschlüsselt, und sie werden anschließen im Cluster entschlüsselt.
+
+# 1.7 Resource Requests und Limits
+
+Ich habe nur auf die zwei zentralen Komponenten des Setups Resource Requests und Limits gesetzt.
+
+1. Keycloak
+2. PSQL
+
+Als relevante Anwendung und DB der Anwendung.
+
+Resource Requests können dabei helfen dem Scheduler die besten Nodes für die Pods zu finden.
+Limits begrenzen wieviel CPU und RAM maximal verwendet werden darf.
+
+Damit kann man die Resourcen seiner Umgebung steuern, limitieren, "hungrige" Komponenten etwas in die Schranken weisen etc.
+
+## Keycloak
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 1500m
+    memory: 2Gi
+
+Bekommt immer mindesten 1Gi RAM und 500m CPU
+Maximal aber 2Gi RAM und 1500m CPU
+
+## PSQL
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+min. 512Mi RAM, 250m CPU
+max. 1000m CPU, 1Gi RAM
+
+kubectl describe pod keycloak-0 -n keycloak | grep -A8 "Limits:"
+kubectl describe pod postgresql-0 -n postgresql | grep -A8 "Limits:"
+
+# 1.8 Health Checks für Keycloak
+
+Ich verwende drei Arten von Probes für Keycloak
+
+## Startup
+
+Falls der container im Pod mal wieder länger braucht als sonst, aus Gründen die nicht immer klar sind ;)
+
+startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 30
+    successThreshold: 1
+
+1. Kubernetes wartet 30 Sekunden.
+2. Danach wird alle 10 Sekunden geprüft.
+3. Keycloak darf 30 mal "nicht bestehen"
+4. Wenn er einmal "besteht" (eine Prüfung) gehts weiter mit Readiness und Liveness Prüfungen
+
+## Readiness
+
+Prüft ob Keycloak kommunizieren kann.
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+
+Werte Beschreibung Analog zu startup Probe
+
+
+## Liveness
+
+Guckt ob der Container noch "lebt". 
+Wenn diese Probe negativ ist, wird der Container neu gestartet. 
+
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+
+## Init container
+Zusätzlich gibt es einen Init Container für PSQL
+
+initContainers:
+  - name: wait-for-postgresql
+    image: busybox:1.36
+    command:
+      - sh
+      - -c
+      - |
+        until nc -z postgresql.postgresql.svc.cluster.local 5432; do
+          echo "Warte auf PostgreSQL..."
+          sleep 5
+        done
+        echo "PostgreSQL ist erreichbar"
+
+Damit startet Keycloak erst, wenn PostgreSQL (auf Port 5432) erreichbar ist.
+Keycloak braucht direkt beim Start seine DB/Daten. 
+
+
+# 2. HELM, Charts, values
+
+Alle zentralen Plattform Komponenten werden per Helm Charts installiert. 
+Im Repository liegen dafür eigene Wrapper Charts unter platform/.
+
+Das bedeutet: Im Repository liegt nicht der komplette Chart Code der jeweiligen Anwendung vor, sondern ein kleines Chart, welches das offizielle Chart nutzt.
+
+Beispiel Keycloak:
+apiVersion: v2
+name: keycloak-wrapper
+description: Wrapper Chart for Keycloak
+type: application
+version: 0.1.0
+
+dependencies:
+  - name: keycloak
+    version: 25.2.0
+    repository: https://charts.bitnami.com/bitnami
+
+Dadurch ist klar dokumentiert:
+
+- welches Chart verwendet wird
+- aus welchem Repository es kommt
+- welche Version verwendet wird
+- welche eigenen Values gesetzt werden
+
+Die heruntergeladenen, gepackten charts werden per .gitignore nicht hochgeladen. 
+helm dependency update --> helm dependency build erzeugt die Chart.lock und lädt die charts runter
+
+Alle relevanten Einstellungen liegen als values.yaml vor
+
+## 2.1 Was verwendet Helm
+
+cert-manager | TLS Zertifikate und Certificate Ressourcen 
+Longhorn | Storage für persistente Daten 
+PostgreSQL | Datenbank für Keycloak 
+Traefik | Ingress Controller 
+Keycloak | Identity und Access Management
+
+Traefik hätte nicht per Helm installiert werden müssen, da K3s Traefik mitbringen kann. 
+Aber ich habe das K3s Traefik bei der installation deaktiviert, damit die Einstellungen im Repository liegen und dort verwaltet werden können.
+
+## 2.2 Helm Repositories
+
+cert-manager -->	oci://quay.io/jetstack/charts	--> v1.20.2
+Longhorn	--> https://charts.longhorn.io	--> 1.11.2
+PostgreSQL -->	https://charts.bitnami.com/bitnami	--> 18.6.6
+Traefik -->	https://traefik.github.io/charts	--> 40.2.0
+Keycloak --> 	https://charts.bitnami.com/bitnami --> 	25.2.0
+
+### Values
+#### cert-manager
+platform/cert-manager/values.yaml
+
+cert-manager:
+  crds:
+    enabled: true
+
+  prometheus:
+    enabled: false
+
+Ich nutze kein prometheus in diesem Setup
+crds sind notwendig für den Issuer
+
+#### Longhorn
+platform/longhorn/values.yaml
+
+longhorn:
+  persistence:
+    defaultClass: false
+    defaultClassReplicaCount: 2
+    reclaimPolicy: Retain
+
+  defaultSettings:
+    defaultDataPath: /var/lib/longhorn
+    defaultReplicaCount: 2
+    storageMinimalAvailablePercentage: 25
+    storageOverProvisioningPercentage: 100
+    replicaSoftAntiAffinity: false
+    replicaAutoBalance: best-effort
+    orphanAutoDeletion: false
+
+(bereits beschrieben bei Sotrage)
+
+### PSQL
+platform/postgresql/values.yaml
+
+postgresql:
+  architecture: standalone
+
+  auth:
+    username: keycloak
+    database: keycloak
+    existingSecret: keycloak-postgresql-auth
+    secretKeys:
+      userPasswordKey: password
+      adminPasswordKey: postgres-password
+
+  primary:
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      size: 10Gi
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+(ebenfalls bereits beschrieben)
+
+### Traefik
+platform/traefik/values.yaml
+
+traefik:
+  deployment:
+    replicas: 2
+
+  service:
+    enabled: true
+    single: true
+    spec:
+      type: NodePort
+
+  ports:
+    web:
+      port: 80
+      exposedPort: 80
+      nodePort: 30080
+      expose:
+        default: true
+
+    websecure:
+      port: 443
+      exposedPort: 443
+      nodePort: 30443
+      expose:
+        default: true
+
+  ingressClass:
+    enabled: true
+    isDefaultClass: true
+
+(ebenfalls beschrieben)
+
+### Keycloak
+platform/keycloak/values.yaml
+
+keycloak:
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/keycloak
+    tag: 26.3.3-debian-12-r0
+
+  auth:
+    adminUser: admin
+    existingSecret: keycloak-admin
+    passwordSecretKey: admin-password
+
+  production: true
+  proxyHeaders: xforwarded
+  hostnameStrict: false
+
+  postgresql:
+    enabled: false
+
+  externalDatabase:
+    host: postgresql.postgresql.svc.cluster.local
+    port: 5432
+    user: keycloak
+    database: keycloak
+    existingSecret: keycloak-database
+    existingSecretPasswordKey: password
+
+  service:
+    type: ClusterIP
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: keycloak.local.example
+    path: /
+    pathType: Prefix
+    servicePort: http
+    tls: true
+    annotations:
+      cert-manager.io/cluster-issuer: selfsigned-cluster-issuer
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1500m
+      memory: 2Gi
+
+(ebenfalls bereits beschrieben)
+
+## Manuelle Installation
+
+### cert-manager
+helm dependency update platform/cert-manager
+
+helm upgrade --install cert-manager platform/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --values platform/cert-manager/values.yaml
+
+ ### Longhorn
+helm dependency update platform/longhorn
+
+helm upgrade --install longhorn platform/longhorn \
+  --namespace longhorn-system \
+  --create-namespace \
+  --values platform/longhorn/values.yaml
+
+### PSQL
+helm dependency update platform/postgresql
+
+helm upgrade --install postgresql platform/postgresql \
+  --namespace postgresql \
+  --create-namespace \
+  --values platform/postgresql/values.yaml
+
+### Traefik
+helm dependency update platform/traefik
+
+helm upgrade --install traefik platform/traefik \
+  --namespace traefik \
+  --create-namespace \
+  --values platform/traefik/values.yaml
+
+
+### Keycloak
+helm dependency update platform/keycloak
+
+helm upgrade --install keycloak platform/keycloak \
+  --namespace keycloak \
+  --create-namespace \
+  --values platform/keycloak/values.yaml
+
+## Reproduzierbarkeit
+
+Die Installation ist reproduzierbar, weil folgende Dinge im Repository liegen:
+1. Chart.yaml mit fester Chart Version
+2. values.yaml mit Einstellungen
+3. fleet.yaml mit Namespace und Abhängigkeiten
+4. GitRepo Resource mit den zu synchronisierenden Pfaden
+
+## Validierung
+1. helm releases
+helm list -A 
+
+2. Fleet bundles
+kubectl get bundles -n fleet-local
+kubectl get bundledeployments -A
+
+3. Pods
+kubectl get pods -A
+oder besser imo
+watch kubectl get pods -A (und zuschauen wie alles startet)
+
+4. services
+kubectl get services -A -o wide
+
+5. Ingress
+kubectl get ingress -A -o wide
+
+6. Keycloak testen
+im Browser: https://keycloak.local.example
+
+
+# 3. ClusterIssuer
+
+Issuer gilt nur für einen Namespace
+ClusterIssuer gilt im ganzen Cluster
+
+Ich verwende ihn zwar nur für Keycloak, aber so kann ich das lab später leicht weiter nutzen.
+
+
+# 4 Let's encrypt
+Ich habe mich für die lokale Alternative C für dieses Setup entschieden.
+Ich habe weder Zugang zu einem DNS Record, nocht kann ich bei einer Domain einen entsprechenden HTTP Pfad ansteuern.
+Mein Zugriff über den Browser funktioniert nur wegen dem Eintrag in /etc/hosts
+
+# 5 Wie würde es "real" funktionieren 
+
+## HTTP-Challange
+Dieses Setup habe ich in meiner prdouktiv Umgebung
+
+Let’s Encrypt --> Domain --> Cloudflare Tunnel (cloudflared) --> Reverse Proxy --> Traefik --> cert-manager Solver
+
+
+cert-manager erstellt eine Challenge Resource, einen Solver Pod, einen Service und eine Ingress Regel. 
+Let’s Encrypt ruft anschließend über HTTP auf.
+
+Damit das funktioniert, muss die öffentliche Domain von Let’s Encrypt erreichbar sein und der HTTP Traffic auf Port 80 bis zum Ingress Controller im Cluster weitergeleitet werden.
