@@ -8,12 +8,16 @@
     kubeconfig_path: "{{ playbook_dir }}/k3s.yaml"
 
     # Standard: Secrets werden nicht mehr direkt durch Ansible erstellt.
-    # Sie kommen über SealedSecrets aus dem Git Repository.
+    # Die normalen Kubernetes Secrets entstehen über SealedSecrets aus dem Git Repository.
     use_plain_kubernetes_secrets: false
 
-    # Nur noch für den alten optionalen Fallback relevant.
+    # Optionaler Fallback für das alte Verhalten.
     secrets_file_path: "{{ playbook_dir }}/group_vars/secrets.yml"
     generated_password_length: 32
+
+    # Lokales Backup des Sealed Secrets Private Keys.
+    # Diese Datei liegt bewusst außerhalb von cluster/ansible und muss per .gitignore ausgeschlossen sein.
+    sealed_secrets_key_backup_path: "{{ playbook_dir }}/../../.local-secrets/sealed-secrets-key-backup.yaml"
 
   environment:
     KUBECONFIG: "{{ kubeconfig_path }}"
@@ -246,6 +250,44 @@
       command: kubectl apply -f ../../fleet/gitrepo.yaml
       args:
         chdir: "{{ playbook_dir }}"
+
+    - name: Prüfen ob lokales Sealed Secrets Key Backup vorhanden ist
+      stat:
+        path: "{{ sealed_secrets_key_backup_path }}"
+      register: sealed_secrets_key_backup
+      no_log: true
+
+    - name: Hinweis ausgeben wenn kein lokales Sealed Secrets Key Backup vorhanden ist
+      debug:
+        msg:
+          - "Kein lokales Sealed Secrets Key Backup gefunden."
+          - "Pfad: {{ sealed_secrets_key_backup_path }}"
+          - "Wenn der Cluster neu erstellt wurde, können bestehende SealedSecrets aus Git nicht entschlüsselt werden."
+          - "In diesem Fall müssen die SealedSecrets manuell mit kubeseal neu erstellt und committed werden."
+      when: not sealed_secrets_key_backup.stat.exists
+
+    - name: Warten bis Sealed Secrets Controller verfügbar ist
+      command: >
+        kubectl -n kube-system rollout status deployment/sealed-secrets-controller
+        --timeout=300s
+      changed_when: false
+      when: sealed_secrets_key_backup.stat.exists
+
+    - name: Lokales Sealed Secrets Key Backup anwenden
+      command: kubectl apply -f "{{ sealed_secrets_key_backup_path }}"
+      when: sealed_secrets_key_backup.stat.exists
+      no_log: true
+
+    - name: Sealed Secrets Controller neu starten damit der Key geladen wird
+      command: kubectl -n kube-system rollout restart deployment/sealed-secrets-controller
+      when: sealed_secrets_key_backup.stat.exists
+
+    - name: Warten bis Sealed Secrets Controller nach Key Restore wieder läuft
+      command: >
+        kubectl -n kube-system rollout status deployment/sealed-secrets-controller
+        --timeout=300s
+      changed_when: false
+      when: sealed_secrets_key_backup.stat.exists
 
     - name: Fleet Status anzeigen
       command: kubectl get gitrepo,bundles,bundledeployments -A
