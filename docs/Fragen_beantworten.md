@@ -1,3 +1,10 @@
+# Local Kubernetes Keycloak Platform
+
+Dieses Repository enthält ein lokales Kubernetes Setup mit K3s, Fleet, Helm, cert-manager, Longhorn, Traefik, PostgreSQL, Keycloak und Sealed Secrets.
+
+Ziel ist es, ein lokales aber möglichst produktionsnahes Setup zu bauen, welches wiederholbar aufgebaut und auch wieder sauber entfernt werden kann.
+
+
 # 1.1 Frage: Wahl der Kubernetes-Distribution
 
 Ich habe mich für ein K3s Multi Node Setup entschieden, welches lokal auf meinem System läuft.
@@ -107,7 +114,7 @@ source ~/.bashrc
 
 Als nächstes wird Fleet auf dem Cluster installiert.
 
-Das Playbook 'ansible-playbook bootstrap-fleet.yml'  prüft zuerst, ob die lokale Kubeconfig vorhanden ist und ob die Kubernetes API erreichbar ist. 
+Das Playbook 'ansible-playbook bootstrap-fleet.yml' prüft zuerst, ob die lokale Kubeconfig vorhanden ist und ob die Kubernetes API erreichbar ist. 
 Danach wird Helm geprüft, weil Fleet selbst über Helm installiert wird.
 Anschließend installiert das Playbook:
 
@@ -118,10 +125,19 @@ Anschließend installiert das Playbook:
 
 (gitRepo: https://github.com/ThomasTannenberg/local-kubernetes-keycloak-platform)
 
-Außerdem generiert dieses Playbook lokale Passwörter, falls noch keine Secret Datei vorhanden ist. Diese Datei liegt lokal unter:
-cluster/ansible/group_vars/secrets.yml
-Auch diese secrets.yml wird per .gitignore nicht in github übertragen. 
-Aus dieser Datei erstellt das Playbook anschließend die benötigten Kubernetes Secrets für PostgreSQL und Keycloak.
+Früher hat dieses Playbook auch die PostgreSQL und Keycloak Secrets direkt als normale Kubernetes Secrets erzeugt.
+Aber ich habe entschieden sealed secrets einzusetzen. 
+
+Im Playbook ist dafür gesetzt:
+use_plain_kubernetes_secrets: false
+
+Für die "neue" Installation ist ein lokale Backup für den Sealed Secrets Key notwendig!
+
+Wenn die Datei vorhanden ist, wartet das Playbook auf den Sealed Secrets Controller, spielt den alten Key wieder ein und startet den Controller neu.
+Das ist wichtig, damit ein neu gebautes Cluster die vorhandenen SealedSecrets aus Git wieder entschlüsseln kann.
+
+Wenn die Datei nicht vorhanden ist, läuft das Setup zwar weiter, aber bestehende SealedSecrets können auf einem neuem Cluster nicht entschlüsselt werden.
+Dann müssen die Secrets neu erzeugt und neu mit kubeseal versiegelt werden!!! 
 
 
 ### GitOps mit Fleet
@@ -134,23 +150,37 @@ Dadurch müssen die Komponenten nicht mehr manuell mit helm upgrade --install in
 Änderungen an Chart.yaml, values.yaml oder Kubernetes Manifesten werden im Git Repository geändert, committed und gepusht. 
 Fleet erkennt diese Änderungen und synchronisiert den Cluster automatisch.
 
-Folgende Plattform Pfade sind vorhanden:
+Folgende Plattform Pfade sind in fleet/gitrepo.yaml eingetragen:
+
 - platform/cert-manager
 - platform/cert-manager-issuer
 - platform/longhorn
 - platform/postgresql
 - platform/traefik
 - platform/keycloak
+- platform/sealed-secrets
+- platform/secrets
 
-Die Reihenfolge wird über dependsOn gesteuert:
-- cert-manager
-- cert-manager-issuer
-- Longhorn
-- PostgreSQL
-- Traefik
-- Keycloak
+Wichtig:
+Die Liste in fleet/gitrepo.yaml ist nicht alleine die fachliche Startreihenfolge.
+Die Reihenfolge wird über dependsOn gesteuert.
+
+Die Abhängigkeiten sind aktuell so aufgebaut:
+
+- cert-manager hat keine eigene dependsOn Abhängigkeit
+- cert-manager-issuer wartet auf cert-manager
+- sealed-secrets hat keine eigene dependsOn Abhängigkeit
+- secrets wartet auf sealed-secrets
+- longhorn wartet auf cert-manager-issuer
+- traefik wartet auf cert-manager-issuer
+- postgresql wartet auf longhorn und secrets
+- keycloak wartet auf postgresql, traefik und secrets
+
+Dadurch können einige Komponenten parallel starten.
+Wichtig ist nur, dass die benötigten Voraussetzungen vorhanden sind, bevor die abhängigen Komponenten starten.
 
 cert-manager muss z.b. vor dem cert-manager-issuer installiert werden, weil ClusterIssuer eine Custom Ressource vom cert-manager ist.
+Sealed Secrets muss vor platform/secrets vorhanden sein, weil sonst die SealedSecret Ressourcen nicht verarbeitet werden können.
 Longhorn muss vor PostgreSQL vorhanden sein, weil PostgreSQL ein persistentes Volume mit der StorageClass longhorn nutzt.
 (anmerkung ich nutze Longhorn nur für PSQL)
 Traefik muss vor Keycloak vorhanden sein, weil Keycloak über einen Ingress erreichbar gemacht wird.
@@ -161,92 +191,10 @@ PostgreSQL muss vor Keycloak laufen, weil Keycloak seine Datenbankverbindung zu 
 Nach der Installation kann geprüft werden, ob das Cluster, Loadbalancer etc. funktioniert.
 
 1. kubectl cluster-info:
-Kubernetes control plane is running at https://192.168.122.10:6443
-CoreDNS is running at https://192.168.122.10:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
-Metrics-server is running at https://192.168.122.10:6443/api/v1/namespaces/kube-system/services/https:metrics-server:https/proxy
-
-
-
 2. kubectl get nodes -o wide
-NAME           STATUS   ROLES                AGE   VERSION        INTERNAL-IP      EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION       CONTAINER-RUNTIME
-k3s-agent-1    Ready    worker               32m   v1.35.4+k3s1   192.168.122.21   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
-k3s-agent-2    Ready    worker               32m   v1.35.4+k3s1   192.168.122.22   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
-k3s-agent-3    Ready    worker               32m   v1.35.4+k3s1   192.168.122.23   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
-k3s-server-1   Ready    control-plane,etcd   33m   v1.35.4+k3s1   192.168.122.11   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
-k3s-server-2   Ready    control-plane,etcd   33m   v1.35.4+k3s1   192.168.122.12   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
-k3s-server-3   Ready    control-plane,etcd   32m   v1.35.4+k3s1   192.168.122.13   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
-
-
 3. kubectl get namespaces
-NAME                                     STATUS   AGE
-cattle-fleet-clusters-system             Active   34m
-cattle-fleet-system                      Active   35m
-cert-manager                             Active   34m
-cluster-fleet-local-local-1a3d67d0a899   Active   34m
-default                                  Active   36m
-fleet-local                              Active   34m
-keycloak                                 Active   34m
-kube-node-lease                          Active   36m
-kube-public                              Active   36m
-kube-system                              Active   36m
-longhorn-system                          Active   33m
-postgresql                               Active   34m
-traefik                                  Active   33m
-
-
-
 4. kubectl get pods -A -o wide
-NAMESPACE             NAME                                                READY   STATUS    RESTARTS      AGE   IP           NODE           NOMINATED NODE   READINESS GATES
-cattle-fleet-system   fleet-agent-84f94fd469-qb4rq                        1/1     Running   0             35m   10.42.4.6    k3s-agent-2    <none>           <none>
-cattle-fleet-system   fleet-controller-775d68bbbf-z52rj                   3/3     Running   0             35m   10.42.7.2    k3s-agent-1    <none>           <none>
-cattle-fleet-system   gitjob-5ddc58fdd5-8dzr6                             1/1     Running   0             35m   10.42.4.2    k3s-agent-2    <none>           <none>
-cattle-fleet-system   helmops-66cc9b955c-zfgvn                            1/1     Running   0             35m   10.42.5.2    k3s-agent-3    <none>           <none>
-cert-manager          cert-manager-65b765f58f-h58xb                       1/1     Running   0             34m   10.42.5.7    k3s-agent-3    <none>           <none>
-cert-manager          cert-manager-cainjector-679cdbbb5c-jfwmn            1/1     Running   0             34m   10.42.5.6    k3s-agent-3    <none>           <none>
-cert-manager          cert-manager-webhook-75bbd7d54f-q9mvs               1/1     Running   0             34m   10.42.4.7    k3s-agent-2    <none>           <none>
-keycloak              keycloak-0                                          1/1     Running   0             32m   10.42.4.19   k3s-agent-2    <none>           <none>
-kube-system           coredns-c4dbffb5f-pzd8l                             1/1     Running   0             37m   10.42.0.4    k3s-server-1   <none>           <none>
-kube-system           local-path-provisioner-5c4dc5d66d-864l6             1/1     Running   0             37m   10.42.0.2    k3s-server-1   <none>           <none>
-kube-system           metrics-server-786d997795-rwtqk                     1/1     Running   0             37m   10.42.0.3    k3s-server-1   <none>           <none>
-longhorn-system       csi-attacher-5557d89ccf-8qr4w                       1/1     Running   0             33m   10.42.4.14   k3s-agent-2    <none>           <none>
-longhorn-system       csi-attacher-5557d89ccf-d8b8m                       1/1     Running   0             33m   10.42.7.9    k3s-agent-1    <none>           <none>
-longhorn-system       csi-attacher-5557d89ccf-ljkct                       1/1     Running   0             33m   10.42.5.14   k3s-agent-3    <none>           <none>
-longhorn-system       csi-provisioner-857485dbfb-5jbb2                    1/1     Running   0             33m   10.42.7.10   k3s-agent-1    <none>           <none>
-longhorn-system       csi-provisioner-857485dbfb-ndqq2                    1/1     Running   0             33m   10.42.4.15   k3s-agent-2    <none>           <none>
-longhorn-system       csi-provisioner-857485dbfb-rr7w8                    1/1     Running   0             33m   10.42.5.15   k3s-agent-3    <none>           <none>
-longhorn-system       csi-resizer-64dcb47b78-58w87                        1/1     Running   0             33m   10.42.5.13   k3s-agent-3    <none>           <none>
-longhorn-system       csi-resizer-64dcb47b78-qr69c                        1/1     Running   0             33m   10.42.7.11   k3s-agent-1    <none>           <none>
-longhorn-system       csi-resizer-64dcb47b78-s5bvr                        1/1     Running   0             33m   10.42.4.16   k3s-agent-2    <none>           <none>
-longhorn-system       csi-snapshotter-9dc596c7c-vdzlz                     1/1     Running   0             32m   10.42.4.17   k3s-agent-2    <none>           <none>
-longhorn-system       csi-snapshotter-9dc596c7c-z5mn4                     1/1     Running   0             32m   10.42.5.16   k3s-agent-3    <none>           <none>
-longhorn-system       csi-snapshotter-9dc596c7c-zsdwx                     1/1     Running   0             32m   10.42.7.13   k3s-agent-1    <none>           <none>
-longhorn-system       engine-image-ei-c9fa6d45-4strb                      1/1     Running   0             33m   10.42.4.12   k3s-agent-2    <none>           <none>
-longhorn-system       engine-image-ei-c9fa6d45-5zdxc                      1/1     Running   0             33m   10.42.5.11   k3s-agent-3    <none>           <none>
-longhorn-system       engine-image-ei-c9fa6d45-j7kdh                      1/1     Running   0             33m   10.42.7.5    k3s-agent-1    <none>           <none>
-longhorn-system       instance-manager-4b471b7c06492de82ed1fa005d31db27   1/1     Running   0             33m   10.42.7.6    k3s-agent-1    <none>           <none>
-longhorn-system       instance-manager-e0153fa1d335aa41faa0c28cf653109a   1/1     Running   0             33m   10.42.4.13   k3s-agent-2    <none>           <none>
-longhorn-system       instance-manager-eae13c6e1aed9de84ba16bac3f5ec1eb   1/1     Running   0             33m   10.42.5.12   k3s-agent-3    <none>           <none>
-longhorn-system       longhorn-csi-plugin-cncfj                           3/3     Running   0             32m   10.42.5.17   k3s-agent-3    <none>           <none>
-longhorn-system       longhorn-csi-plugin-hz4zq                           3/3     Running   0             32m   10.42.7.12   k3s-agent-1    <none>           <none>
-longhorn-system       longhorn-csi-plugin-mdz8n                           3/3     Running   0             32m   10.42.4.18   k3s-agent-2    <none>           <none>
-longhorn-system       longhorn-driver-deployer-7f5b6fb9b8-xsds6           1/1     Running   0             33m   10.42.5.8    k3s-agent-3    <none>           <none>
-longhorn-system       longhorn-manager-ccvqb                              2/2     Running   0             33m   10.42.4.9    k3s-agent-2    <none>           <none>
-longhorn-system       longhorn-manager-dvhds                              2/2     Running   1 (33m ago)   33m   10.42.5.9    k3s-agent-3    <none>           <none>
-longhorn-system       longhorn-manager-nn4qd                              2/2     Running   0             33m   10.42.7.3    k3s-agent-1    <none>           <none>
-longhorn-system       longhorn-ui-7fb5c57b8b-n4cmv                        1/1     Running   0             33m   10.42.7.4    k3s-agent-1    <none>           <none>
-longhorn-system       longhorn-ui-7fb5c57b8b-q58v4                        1/1     Running   0             33m   10.42.4.10   k3s-agent-2    <none>           <none>
-postgresql            postgresql-0                                        1/1     Running   0             33m   10.42.7.14   k3s-agent-1    <none>           <none>
-traefik               traefik-775f4fffdc-7tksv                            1/1     Running   0             33m   10.42.5.10   k3s-agent-3    <none>           <none>
-traefik               traefik-775f4fffdc-9ddls                            1/1     Running   0             33m   10.42.4.11   k3s-agent-2    <none>           <none>
-
-
-
 5. kubectl get storageclasses
-
-NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
-local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false                  37m
-longhorn               driver.longhorn.io      Retain          Immediate              true                   34m
-longhorn-static        driver.longhorn.io      Delete          Immediate              true                   34m
 
 # 1.3 Repository und Cluster Struktur
 
@@ -264,12 +212,15 @@ cluster/
 docs/
 fleet/
 platform/
+    sealed-secrets/
+    secrets/
     cert-manager/
     cert-manager-issuer/
     keycloak/
     longhorn/
     postgresql/
     traefik/
+.local-secrets/ *liegt auf .gitignore
 tmp/ *liegt auf .gitignore
 
 ## Makefile
@@ -307,37 +258,49 @@ gitrepo.yaml
 Damit wird das kaufende Cluster mit dem Repostiory verbunden
 Fleet überwacht dann die Platform Komponenten unter platform/
 
+## platform/sealed-secrets
+Hier liegt der Sealed Secrets Controller als Wrapper Chart.
+
+Der Controller läuft im kube-system Namespace und entschlüsselt die SealedSecret Ressourcen wieder zu normalen Kubernetes Secrets.
+
+Der private Schlüssel vom Controller ist dabei wichtig.
+Wenn das Cluster neu gebaut wird und dieser Schlüssel nicht wiederhergestellt wird, können die alten SealedSecret Dateien nicht mehr entschlüsselt werden!
+
+## platform/secrets
+Hier liegen die verschlüsselten Secrets für PostgreSQL und Keycloak.
+
+Die normalen Kubernetes Secrets liegen dadurch nicht als Klartext im Git Repository.
+Fleet spielt nur die SealedSecret Dateien ein.
+Der Sealed Secrets Controller erzeugt daraus im jeweiligen Namespace die normalen Kubernetes Secrets.
+
 ## platform/cert-manager
 Der cert-manager wird benötigt, um TLS Zertifikate innerhalb des Clusters zu erzeugen und zu verwalten.
 
 Die CRDs werden über die Helm Values aktiviert.
-Prometheus deaktiviert... hier gibt es kein Prometheus.
+Prometheus ist deaktivier... hier gibt es kein Prometheus.
 
 ## platform/cert-manager-issuer
 Der Issuer ist von cert-manager getrennt, da es sonst zu konflikten mit fleet gekommen ist.
-Der VlusterIssuer ist eine Custom Resource. 
+Der ClusterIssuer ist eine Custom Resource. 
 Ursprünglich war der ClusterIssuer ein template, aber fleet hat versucht beides gleichzeitig zu installieren. 
 Aber zuerst muss cert-manager seine CRDs insallieren. 
 
 ## platform/longhorn
 Dieser Ordner wird für Longhorn verwendet.
-
 Nur PostgreSQL nutzt die StorageClass longhorn für sein pv.
 
 ## platform/traefik
 Traefik läuft nur als NodePort Service. HAProxy leitet Port 80 und 443 auf die Traefik NodePorts der Agent Nodes weiter.
-
 Dadurch ist später Keycloak über den LoadBalancer erreichbar.
 
 ## platform/postgresql
 
 PostgreSQL läuft als Datenbank für Keycloak und nutzt ein persistentes Volume mit der StorageClass longhorn.
-
-Die Passwörter liegen nicht im Git Repository, sondern werden beim Fleet Bootstrap lokal generiert und als Kubernetes Secrets erstellt.
+Die Passwörter liegen nicht als Klartext im Git Repository.
+Die Secrets werden als SealedSecrets unter platform/secrets versioniert und vom Sealed Secrets Controller im Cluster wieder als Kubernetes Secrets erstellt.
 
 ## platform/keycloak
 Keycloak verwendet PostgreSQL als DB. 
-
 Der Zugriff erfolgt über Traefik Ingress und TLS über cert-manager.
 
 ## Namespaces
@@ -385,7 +348,7 @@ Die kubeconfig zeig ebenfalls auf den Loadbalancer.
 
 #### HTTP, HTTPS an Traefik weiterleiten
 
-Für Anwendungenr verwende in Traefik als Ingress Controller.
+Für Anwendungen verwende in Traefik als Ingress Controller.
 Ich habe mich für Traefik entschieden, da ich es auch bei der Arbeit verwende.
 Dabei läuft Traefik als NodePort Service.
 
@@ -410,25 +373,8 @@ Durch das Service Modell ist klar getrennt, welche Komponenten nur intern erreic
 Die Services können mit folgendem Befehl geprüft werden:
 
 kubectl get services -A
-NAMESPACE             NAME                          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
-cattle-fleet-system   gitjob                        ClusterIP   10.43.3.94      <none>        80/TCP                       110m
-cattle-fleet-system   monitoring-fleet-controller   ClusterIP   10.43.117.255   <none>        8080/TCP                     110m
-cattle-fleet-system   monitoring-gitjob             ClusterIP   10.43.249.52    <none>        8081/TCP                     110m
-cert-manager          cert-manager-webhook          ClusterIP   10.43.158.27    <none>        443/TCP                      109m
-default               kubernetes                    ClusterIP   10.43.0.1       <none>        443/TCP                      111m
-keycloak              keycloak                      ClusterIP   10.43.83.138    <none>        80/TCP                       106m
-keycloak              keycloak-headless             ClusterIP   None            <none>        8080/TCP                     106m
-kube-system           kube-dns                      ClusterIP   10.43.0.10      <none>        53/UDP,53/TCP,9153/TCP       111m
-kube-system           metrics-server                ClusterIP   10.43.177.120   <none>        443/TCP                      111m
-longhorn-system       longhorn-admission-webhook    ClusterIP   10.43.110.101   <none>        9502/TCP                     108m
-longhorn-system       longhorn-backend              ClusterIP   10.43.18.71     <none>        9500/TCP                     108m
-longhorn-system       longhorn-frontend             ClusterIP   10.43.151.124   <none>        80/TCP                       108m
-longhorn-system       longhorn-recovery-backend     ClusterIP   10.43.2.113     <none>        9503/TCP                     108m
-postgresql            postgresql                    ClusterIP   10.43.96.1      <none>        5432/TCP                     108m
-postgresql            postgresql-hl                 ClusterIP   None            <none>        5432/TCP                     108m
-traefik               traefik                       NodePort    10.43.190.216   <none>        80:30080/TCP,443:30443/TCP   108m
 
-Alles (bis auf Traefik, siehe oben in der Dokumentation) nutzt ClusterIP und ist damit nur innerhalb des Clusters erreichbar. 
+Alles nutzt ClusterIP und ist damit nur innerhalb des Clusters erreichbar. 
 
 Es gibt einen festen Einstiegspunkt über den Loadbalancer: 192.168.122.10.
 Interne Services bleiben intern.
@@ -440,10 +386,10 @@ TLS kann über cert-manager verwaltet werden.
 Ingress wird für Anwendungen genutzt, die von außen erreichbar sein sollen.
 Hier betrifft das nur Keycloak
 
+Prüfen mit:
 kubectl get ingress -A -o wide
 
-NAMESPACE   NAME       CLASS     HOSTS                    ADDRESS   PORTS     AGE
-keycloak    keycloak   traefik   keycloak.local.example             80, 443   110m
+
 
 man kann keycloak über https://keycloak.local.example im browser erreichen
 
@@ -494,7 +440,6 @@ Status:
     Status:                True
     Type:                  Ready
 Events:                    <none>
-
 
 
 Das ist für diese Umgebung ausreichend, weil ich hier nur einen lokalen Hostname verwenden kann. 
@@ -573,61 +518,205 @@ Keycloak selbst muss nicht Longhorn nutzen, alle Daten sind in PSQL. der Keycloa
 
 # 1.6 Kubernetes secrets und sensible Daten
 
+Admin Zugangsdaten, Datenbankpasswörter und TLS Schlüssel werden nicht als Klartext in Git oder in der Dokumentation abgelegt.
 
-Admin Zugangsdaten, Datenbankpasswörter und TLS Schlüssel werden nicht in Git oder in der Dokumentation abgelegt.
-
-Allgemein werden Secrets auf zwei Arten erzeugt:
+Allgemein werden Secrets auf mehrere Arten erzeugt:
 
 1. Automatisch durch Kubernetes, Helm oder die Komponenten
-2. Durch das Ansible Playbook bootstrap-fleet.yml für PostgreSQL und Keycloak
+2. Durch cert-manager für TLS
+3. Durch Sealed Secrets für PostgreSQL und Keycloak
 
-Die lokal, zur runtime erzeugten Passwörter liegen nur in der lokalen Datei:
+Mit Sealed Secrets liegen die Secrets jetzt verschlüsselt im Git Repository.
+Fleet kann sie deployen und der Sealed Secrets Controller erzeugt daraus die normalen Kubernetes Secrets im Cluster.
 
-cluster/ansible/group_vars/secrets.yml
-Diese Datei wird über .gitignore ausgeschlossen und nicht hochgeladen.
+## Sealed Secrets Controller
+
+Der Controller wird über den Pfad installiert:
+
+platform/sealed-secrets
+
+Er läuft im Namespace kube-system.
+
+Dazu gibt es ein Wrapper Chart:
+
+
+apiVersion: v2
+name: sealed-secrets-wrapper
+description: Wrapper Chart for Bitnami Sealed Secrets Controller
+type: application
+version: 0.1.0
+
+dependencies:
+  - name: sealed-secrets
+    version: 2.17.3
+    repository: https://bitnami-labs.github.io/sealed-secrets
+
+
+In den values wird der Name fest gesetzt:
+
+
+sealed-secrets:
+  fullnameOverride: sealed-secrets-controller
+
+
+Das ist wichtig, weil kubeseal später genau diesen Controller Namen und Namespace verwendet.
+
+## Verschlüsselte Secrets
+
+Die verschlüsselten Secret liegen hier:
+
+platform/secrets
+
+- keycloak-admin.sealedsecret.yaml
+- keycloak-database.sealedsecret.yaml
+- keycloak-postgresql-auth.sealedsecret.yaml
+
+
+Diese Dateien dürfen ins Git Repository.
+
+
+## Fleet Reihenfolge
+
+Die Reihenfolge ist hier wichtig.
+
+Sealed Secrets muss vor platform/secrets installiert werden.
+PostgreSQL und Keycloak müssen warten, bis platform/secrets angewendet wurde.
+
+Sonst kann es passieren, dass PostgreSQL oder Keycloak starten wollen, aber die benötigten Secrets noch nicht existieren.
+
+Die Reihenfolge kommt über dependsOn.
+Für die Secrets bedeutet das konkret:
+
+1. platform/sealed-secrets
+2. platform/secrets
+3. platform/postgresql und platform/keycloak warten auf platform/secrets
+
+## Wie Secrets lokal erzeugen und versiegeln
+
+Um normale Secrets lokal zu erzeugen erzeugt und danach direkt mit kubeseal zu verschlüsseln:
+
+Beispiel PostgreSQL:
+
+
+kubectl -n postgresql create secret generic keycloak-postgresql-auth \
+  --from-literal=password='KEYCLOAK_DB_PASSWORT' \
+  --from-literal=postgres-password='POSTGRES_ADMIN_PASSWORT' \
+  --dry-run=client -o yaml > /tmp/keycloak-postgresql-auth.secret.yaml
+
+
+Keycloak Admin:
+
+
+kubectl -n keycloak create secret generic keycloak-admin \
+  --from-literal=admin-password='KEYCLOAK_ADMIN_PASSWORT' \
+  --dry-run=client -o yaml > /tmp/keycloak-admin.secret.yaml
+
+
+Keycloak DB Secret:
+
+
+kubectl -n keycloak create secret generic keycloak-database \
+  --from-literal=password='KEYCLOAK_DB_PASSWORT' \
+  --dry-run=client -o yaml > /tmp/keycloak-database.secret.yaml
+
+
+Diese Dateien bleiben nur temporär lokal.
+
+## Daraus SealedSecrets erstellen
+
+kubeseal \
+  --controller-name sealed-secrets-controller \
+  --controller-namespace kube-system \
+  --format yaml \
+  < /tmp/keycloak-postgresql-auth.secret.yaml \
+  > platform/secrets/keycloak-postgresql-auth.sealedsecret.yaml
+
+kubeseal \
+  --controller-name sealed-secrets-controller \
+  --controller-namespace kube-system \
+  --format yaml \
+  < /tmp/keycloak-admin.secret.yaml \
+  > platform/secrets/keycloak-admin.sealedsecret.yaml
+
+kubeseal \
+  --controller-name sealed-secrets-controller \
+  --controller-namespace kube-system \
+  --format yaml \
+  < /tmp/keycloak-database.secret.yaml \
+  > platform/secrets/keycloak-database.sealedsecret.yaml
+
+
+Danach die Klartext Dateien löschen:
+
+
+rm /tmp/keycloak-postgresql-auth.secret.yaml
+rm /tmp/keycloak-admin.secret.yaml
+rm /tmp/keycloak-database.secret.yaml
+
 
 ## Verwendete Secrets
 
-Prüfung mit kubectl get secrets -A -o wide
+Prüfung mit:
+
+
+kubectl get secrets -A -o wide
+
 
 ### PSQL Secret
 
+kubectl get secrets -n postgresql
 
-kubectl get secrets -n postgresql 
 
-NAME                               TYPE                 DATA   AGE
-keycloak-postgresql-auth           Opaque               2      24h
+
+NAME                               TYPE                 DATA
+keycloak-postgresql-auth           Opaque               2
 
 
 enthält die beiden Werte:
+
 - postgres-password --> PSQL Admin Password
 - password --> Keycloak DB User
 
 Prüfen mit:
-- kubectl get secret keycloak-postgresql-auth -n postgresql
-- kubectl describe secret keycloak-postgresql-auth -n postgresql
+
+
+kubectl get secret keycloak-postgresql-auth -n postgresql
+kubectl describe secret keycloak-postgresql-auth -n postgresql
+
 
 Auslesen des Passwords für den Keycloak User für die PSQL-DB:
+
 
 kubectl get secret keycloak-postgresql-auth -n postgresql \
   -o jsonpath="{.data.password}" | base64 -d; echo
 
+
 ### Keycloak Secrets
+
 
 kubectl get secrets -n keycloak
 
-NAME                             TYPE                 DATA   AGE
-keycloak-admin                   Opaque               1      24h
-keycloak-database                Opaque               1      24h
-keycloak.local.example-tls       kubernetes.io/tls    3      24h
 
-prüfen mit (z.b.):
+
+NAME                             TYPE                 DATA
+keycloak-admin                   Opaque               1
+keycloak-database                Opaque               1
+keycloak.local.example-tls       kubernetes.io/tls    3
+
+
+prüfen mit z.b.:
+
+
 kubectl get secret keycloak-admin -n keycloak
 kubectl describe secret keycloak-admin -n keycloak
 
+
 Admin Password auslesen mit:
+
+
 kubectl get secret keycloak-admin -n keycloak \
   -o jsonpath="{.data.admin-password}" | base64 -d; echo
+
 
 Analog mit dem keycloak-database Secret.
 Dieses Secret muss doppelt vorhanden sein, einmal im Postgresql Namespace und im Keycloak Namespace, da Kubernetes Secrets nicht in unterschiedlichen namespaces funktionieren.
@@ -637,13 +726,15 @@ Das TLS secret wurde durch cert-manager erstellt und enthält das zertifikat fü
 
 #### Was erstellt welches Secret
 
-keycloak-postgresql-auth --> Ansible 
+keycloak-postgresql-auth --> Sealed Secrets
 
-keycloak-admin --> Ansible
+keycloak-admin --> Sealed Secrets
 
-keycloak-database --> Ansible
+keycloak-database --> Sealed Secrets
 
 keycloak.local.example-tls --> cert-manager
+
+sealed-secrets-key... --> Sealed Secrets Controller (sollte aufgehoben werden für neuinstallationen!)
 
 Helm Secrets --> Helm
 
@@ -651,10 +742,89 @@ Fleet Secrets --> Fleet
 
 Node Secrets --> K3s
 
-##### Anmerkung
-Für dieses Setup ist das ausschließen der Secrets nach dem erzeugen ausreichend.
-In meiner Produktiv Umgebung nutze ich dazu Sealed Secrets. 
-Damit liegen die Secrets zwar in Git, aber dort verschlüsselt, und sie werden anschließen im Cluster entschlüsselt.
+## Wichtig: Sealed Secrets Key
+
+Ein SealedSecret ist immer an den öffentlichen Schlüssel eines bestimmten Sealed Secrets Controllers gebunden.
+Der passende private Schlüssel liegt im Cluster als Kubernetes Secret.
+
+Wenn das Cluster neu aufgebaut wird und dieser private Schlüssel nicht wiederhergestellt wird, kann der neue Controller die alten SealedSecret Dateien aus Git nicht entschlüsseln.
+
+Dann kommt z.b. folgender Fehler:
+
+
+no key could decrypt secret
+
+
+Das bedeutet für dieses Setup:
+
+Wenn ich ein komplett neues Cluster baue und den alten Sealed Secrets Key nicht wieder einspiele, sind die bestehenden Dateien unter:
+
+
+platform/secrets/*.sealedsecret.yaml
+
+
+für dieses neue Cluster nicht mehr nutzbar.
+
+Dann gibt es zwei Möglichkeiten.
+
+### Möglichkeit 1: Key sichern und beim Bootstrap wieder einspielen
+
+Das ist der bessere Weg, wenn das Git Repository dauerhaft reproduzierbar sein soll.
+
+Ablauf:
+
+1. Cluster wird erstellt
+2. Fleet wird installiert
+3. Sealed Secrets Controller wird installiert
+4. alter Sealed Secrets Private Key wird eingespielt
+5. Controller wird neu gestartet
+6. SealedSecrets aus Git können entschlüsselt werden
+7. PostgreSQL und Keycloak starten
+
+Der Key kann lokal gesichert werden mit:
+
+
+mkdir -p .local-secrets
+
+kubectl -n kube-system get secret \
+  -l sealedsecrets.bitnami.com/sealed-secrets-key \
+  -o yaml > .local-secrets/sealed-secrets-key-backup.yaml
+
+chmod 600 .local-secrets/sealed-secrets-key-backup.yaml
+
+
+Die Datei liegt bewusst unter:
+
+
+.local-secrets/sealed-secrets-key-backup.yaml
+
+
+Diese Datei darf nicht ins Git.
+Sie ist deswegen über .gitignore ausgeschlossen.
+
+
+Wiederherstellen:
+
+
+kubectl apply -f .local-secrets/sealed-secrets-key-backup.yaml
+kubectl -n kube-system rollout restart deployment sealed-secrets-controller
+
+
+### Möglichkeit 2: Secrets neu erzeugen und neu versiegeln
+
+Wenn der alte Key nicht mehr vorhanden ist, müssen die Secrets neu erzeugt und mit dem neuen Controller neu verschlüsselt werden.
+
+Das bedeutet:
+
+1. neue normale Secrets lokal erstellen
+2. mit kubeseal gegen den neuen Controller verschlüsseln
+3. alte SealedSecret Dateien ersetzen
+4. committen und pushen
+5. Fleet synced die neuen Dateien
+
+Das ist ok für ein lokales Lab.
+Für echte Umgebungen wäre das aber unschön, weil man dann die alten verschlüsselten Secrets nicht einfach wiederverwenden kann.
+
 
 # 1.7 Resource Requests und Limits
 
@@ -802,6 +972,7 @@ Alle relevanten Einstellungen liegen als values.yaml vor
 ## 2.1 Was verwendet Helm
 
 cert-manager | TLS Zertifikate und Certificate Ressourcen 
+Sealed Secrets | Verschlüsselte Secrets für GitOps
 Longhorn | Storage für persistente Daten 
 PostgreSQL | Datenbank für Keycloak 
 Traefik | Ingress Controller 
@@ -813,12 +984,22 @@ Aber ich habe das K3s Traefik bei der installation deaktiviert, damit die Einste
 ## 2.2 Helm Repositories
 
 cert-manager -->	oci://quay.io/jetstack/charts	--> v1.20.2
+Sealed Secrets --> https://bitnami-labs.github.io/sealed-secrets --> 2.17.3
 Longhorn	--> https://charts.longhorn.io	--> 1.11.2
 PostgreSQL -->	https://charts.bitnami.com/bitnami	--> 18.6.6
 Traefik -->	https://traefik.github.io/charts	--> 40.2.0
 Keycloak --> 	https://charts.bitnami.com/bitnami --> 	25.2.0
 
 ### Values
+#### Sealed Secrets
+platform/sealed-secrets/values.yaml
+
+
+sealed-secrets:
+  fullnameOverride: sealed-secrets-controller
+
+Der Name ist fest gesetzt, damit kubeseal sauber gegen diesen Controller arbeiten kann.
+
 #### cert-manager
 platform/cert-manager/values.yaml
 
@@ -858,6 +1039,11 @@ platform/postgresql/values.yaml
 postgresql:
   architecture: standalone
 
+  image:
+    registry: registry-1.docker.io
+    repository: bitnami/postgresql
+    tag: latest
+
   auth:
     username: keycloak
     database: keycloak
@@ -881,6 +1067,9 @@ postgresql:
         memory: 1Gi
 
 (ebenfalls bereits beschrieben)
+
+Der Image Tag steht aktuell bewusst auf latest.
+Das ist für dieses lokale Lab ok, bedeutet aber auch, dass beim neuen Pull nicht zwingend exakt dieselbe PostgreSQL Image Version genutzt wird.
 
 ### Traefik
 platform/traefik/values.yaml
@@ -913,6 +1102,19 @@ traefik:
   ingressClass:
     enabled: true
     isDefaultClass: true
+
+  providers:
+    kubernetesCRD:
+      enabled: true
+      ingressClass: traefik
+
+    kubernetesIngress:
+      enabled: true
+      ingressClass: traefik
+
+  logs:
+    general:
+      level: INFO
 
 (ebenfalls beschrieben)
 
@@ -970,6 +1172,29 @@ keycloak:
 (ebenfalls bereits beschrieben)
 
 ## Manuelle Installation
+
+### Sealed Secrets
+helm dependency update platform/sealed-secrets
+
+helm upgrade --install sealed-secrets platform/sealed-secrets \
+  --namespace kube-system \
+  --create-namespace \
+  --values platform/sealed-secrets/values.yaml
+
+### Secrets
+
+Die SealedSecret Dateien können manuell so angewendet werden:
+
+kubectl apply -f platform/secrets/keycloak-postgresql-auth.sealedsecret.yaml
+kubectl apply -f platform/secrets/keycloak-admin.sealedsecret.yaml
+kubectl apply -f platform/secrets/keycloak-database.sealedsecret.yaml
+
+Prüfen:
+
+kubectl get sealedsecrets -A
+kubectl -n postgresql get secret keycloak-postgresql-auth
+kubectl -n keycloak get secret keycloak-admin
+kubectl -n keycloak get secret keycloak-database
 
 ### cert-manager
 helm dependency update platform/cert-manager
@@ -1033,13 +1258,16 @@ kubectl get pods -A
 oder besser imo
 watch kubectl get pods -A (und zuschauen wie alles startet)
 
-4. services
+4. Sealed Secrets
+kubectl get sealedsecrets -A
+
+5. services
 kubectl get services -A -o wide
 
-5. Ingress
+6. Ingress
 kubectl get ingress -A -o wide
 
-6. Keycloak testen
+7. Keycloak testen
 im Browser: https://keycloak.local.example
 
 
