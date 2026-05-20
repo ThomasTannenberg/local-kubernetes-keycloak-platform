@@ -14,3 +14,4 @@ spec:
     - platform/traefik
     - platform/keycloak
     - platform/sealed-secrets
+    - platform/secrets
