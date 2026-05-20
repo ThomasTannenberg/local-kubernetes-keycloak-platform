@@ -266,6 +266,16 @@
           - "In diesem Fall müssen die SealedSecrets manuell mit kubeseal neu erstellt und committed werden."
       when: not sealed_secrets_key_backup.stat.exists
 
+    - name: Warten bis Sealed Secrets Controller Deployment existiert
+      command: >
+        kubectl -n kube-system get deployment sealed-secrets-controller
+      register: sealed_secrets_controller_deployment
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: sealed_secrets_controller_deployment.rc == 0
+      when: sealed_secrets_key_backup.stat.exists
+
     - name: Warten bis Sealed Secrets Controller verfügbar ist
       command: >
         kubectl -n kube-system rollout status deployment/sealed-secrets-controller
