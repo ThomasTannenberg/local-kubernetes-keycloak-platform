@@ -1,0 +1,4 @@
+defaultNamespace: kube-system
+
+helm:
+  releaseName: sealed-secrets

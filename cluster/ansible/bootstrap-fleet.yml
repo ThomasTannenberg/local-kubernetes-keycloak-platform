@@ -6,6 +6,12 @@
 
   vars:
     kubeconfig_path: "{{ playbook_dir }}/k3s.yaml"
+
+    # Standard: Secrets werden nicht mehr direkt durch Ansible erstellt.
+    # Sie kommen über SealedSecrets aus dem Git Repository.
+    use_plain_kubernetes_secrets: false
+
+    # Nur noch für den alten optionalen Fallback relevant.
     secrets_file_path: "{{ playbook_dir }}/group_vars/secrets.yml"
     generated_password_length: 32
 
@@ -17,12 +23,15 @@
       stat:
         path: "{{ secrets_file_path }}"
       register: secrets_file
+      when: use_plain_kubernetes_secrets | bool
 
     - name: Vorhandene Secret Datei lesen
       slurp:
         path: "{{ secrets_file_path }}"
       register: existing_secrets_file
-      when: secrets_file.stat.exists
+      when:
+        - use_plain_kubernetes_secrets | bool
+        - secrets_file.stat.exists
       no_log: true
 
     - name: Prüfen ob vorhandene Secret Datei noch Platzhalter enthält
@@ -36,13 +45,17 @@
               'keycloak-admin-password' in (existing_secrets_file.content | b64decode)
             )
           }}
-      when: secrets_file.stat.exists
+      when:
+        - use_plain_kubernetes_secrets | bool
+        - secrets_file.stat.exists
       no_log: true
 
     - name: Secret Platzhalter Status setzen wenn Datei fehlt
       set_fact:
         secrets_file_contains_placeholders: false
-      when: not secrets_file.stat.exists
+      when:
+        - use_plain_kubernetes_secrets | bool
+        - not secrets_file.stat.exists
       no_log: true
 
     - name: Zufällige Passwörter generieren
@@ -50,7 +63,9 @@
         generated_keycloak_db_password: "{{ lookup('password', '/dev/null length=' ~ generated_password_length ~ ' chars=ascii_letters,digits') }}"
         generated_postgres_admin_password: "{{ lookup('password', '/dev/null length=' ~ generated_password_length ~ ' chars=ascii_letters,digits') }}"
         generated_keycloak_admin_password: "{{ lookup('password', '/dev/null length=' ~ generated_password_length ~ ' chars=ascii_letters,digits') }}"
-      when: not secrets_file.stat.exists or secrets_file_contains_placeholders | bool
+      when:
+        - use_plain_kubernetes_secrets | bool
+        - not secrets_file.stat.exists or secrets_file_contains_placeholders | bool
       no_log: true
 
     - name: Lokale Secret Datei mit generierten Passwörtern erstellen oder ersetzen
@@ -65,12 +80,15 @@
           keycloak_db_password: "{{ generated_keycloak_db_password }}"
           postgres_admin_password: "{{ generated_postgres_admin_password }}"
           keycloak_admin_password: "{{ generated_keycloak_admin_password }}"
-      when: not secrets_file.stat.exists or secrets_file_contains_placeholders | bool
+      when:
+        - use_plain_kubernetes_secrets | bool
+        - not secrets_file.stat.exists or secrets_file_contains_placeholders | bool
       no_log: true
 
     - name: Lokale Secret Variablen laden
       include_vars:
         file: "{{ secrets_file_path }}"
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
   tasks:
@@ -95,6 +113,7 @@
           - postgres_admin_password | length > 0
           - keycloak_admin_password | length > 0
         fail_msg: "Secret Variablen konnten nicht geladen werden."
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: Kubernetes API prüfen
@@ -179,12 +198,14 @@
         --dry-run=client -o yaml
       register: postgresql_secret
       changed_when: false
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: PostgreSQL Secret anwenden
       command: kubectl apply -f -
       args:
         stdin: "{{ postgresql_secret.stdout }}"
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: Keycloak Admin Secret erzeugen
@@ -194,12 +215,14 @@
         --dry-run=client -o yaml
       register: keycloak_admin_secret
       changed_when: false
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: Keycloak Admin Secret anwenden
       command: kubectl apply -f -
       args:
         stdin: "{{ keycloak_admin_secret.stdout }}"
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: Keycloak Datenbank Secret erzeugen
@@ -209,12 +232,14 @@
         --dry-run=client -o yaml
       register: keycloak_database_secret
       changed_when: false
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: Keycloak Datenbank Secret anwenden
       command: kubectl apply -f -
       args:
         stdin: "{{ keycloak_database_secret.stdout }}"
+      when: use_plain_kubernetes_secrets | bool
       no_log: true
 
     - name: Fleet GitRepo anwenden

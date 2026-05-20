@@ -6,6 +6,7 @@ dependsOn:
       - Ready
       - Modified
   - name: local-keycloak-platform-platform-traefik
+  - name: local-keycloak-platform-platform-secrets
 
 helm:
   releaseName: keycloak

@@ -13,3 +13,4 @@ spec:
     - platform/postgresql
     - platform/traefik
     - platform/keycloak
+    - platform/sealed-secrets

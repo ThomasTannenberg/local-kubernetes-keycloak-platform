@@ -2,6 +2,7 @@ defaultNamespace: postgresql
 
 dependsOn:
   - name: local-keycloak-platform-platform-longhorn
+  - name: local-keycloak-platform-platform-secrets
 
 helm:
   releaseName: postgresql
