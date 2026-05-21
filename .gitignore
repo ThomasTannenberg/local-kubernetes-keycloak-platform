@@ -1,26 +1,18 @@
 tmp/
 temp/
 *.tmp
-*.log
 
 .k3s-bootstrap-token
 **/.k3s-bootstrap-token
 k3s.yaml
 **/k3s.yaml
 *.kubeconfig
-kubeconfig*
-admin.conf
 
 .env
-.env.*
-!.env.example
 .secrets.env
 .local-secrets/
 cluster/ansible/group_vars/secrets.yml
 !cluster/ansible/group_vars/secrets-example.yml
-
-*.retry
-.ansible/
 
 platform/*/charts/
 platform/*/Chart.lock
