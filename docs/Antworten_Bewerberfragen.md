@@ -665,6 +665,7 @@ make vm-create
 make cluster-create
 make fleet-bootstrap
 make install
+make secrets-bootstrap
 make validate
 make cleanup
 ```
@@ -684,8 +685,14 @@ Installiert Fleet und verbindet das Cluster mit dem Git Repository.
 make install
 Führt vm-create, cluster-create und fleet-bootstrap aus.
 
+make secrets-bootstrap
+Einmaliger Schritt nach dem ersten Cluster-Start.
+Erzeugt frische SealedSecrets gegen den jetzt im Cluster laufenden
+Controller und sichert den Private Key in .local-secrets/.
+
 make validate
-Zeigt Nodes, Pods und Fleet Status.
+Zeigt Nodes, Pods, Fleet Status, IngressClass, ClusterIssuer,
+Ingress, Certificates und prüft HTTPS gegen Keycloak.
 
 make cleanup
 Entfernt Cluster und VMs.
@@ -1324,9 +1331,10 @@ Aus dem Repository Root:
 
 ```bash
 make install
+make secrets-bootstrap
 ```
 
-Das führt aus:
+`make install` führt aus:
 
 ```text
 make vm-create
@@ -1334,7 +1342,11 @@ make cluster-create
 make fleet-bootstrap
 ```
 
-Danach übernimmt Fleet die Installation der Plattform Komponenten.
+`make secrets-bootstrap` ist einmalig nach dem ersten Cluster-Start nötig.
+Es erzeugt frische SealedSecrets, die zum frisch deployten
+sealed-secrets-controller passen, applied sie direkt im Cluster und sichert
+den Private Key des Controllers in `.local-secrets/`. Danach übernimmt Fleet
+die Installation der Plattform Komponenten.
 
 Status prüfen:
 
@@ -1349,6 +1361,7 @@ Einzelne Schritte:
 make vm-create
 make cluster-create
 make fleet-bootstrap
+make secrets-bootstrap
 make validate
 make cleanup
 ```
