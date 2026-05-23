@@ -1833,13 +1833,13 @@ Makefile für Setup, Validierung und Cleanup
 Fleet als GitOps Ansatz, der sicherlich noch verbessert werden kann. 
 ```
 
-Die wichtigste Einschränkung ist Let’s Encrypt.
+Es gibt zwei Einschränkungen:
 
-Da das Setup lokal ist und keine öffentliche Domain verwendet wird, kann Let’s Encrypt die Domain nicht validieren. Deshalb verwende ich lokal einen selfsigned ClusterIssuer über cert-manager und beschreibe zusätzlich, wie es mit echter Domain funktionieren würde.
 
-Fleet zeigt bei cert-manager einen erwarteten Drift, weil cert-manager beziehungsweise der Webhook die caBundle Felder automatisch verwaltet. Für Keycloak und PostgreSQL entsteht Drift durch vom Chart erzeugte NetworkPolicies. Die Workloads laufen, aber der GitOps Status ist dadurch nicht vollständig Ready.
+1. Da das Setup lokal ist und keine öffentliche Domain verwendet wird, kann Let’s Encrypt die Domain nicht validieren. Deshalb verwende ich lokal einen selfsigned ClusterIssuer über cert-manager und beschreibe zusätzlich, wie es mit echter Domain funktionieren würde.
 
-Für mich war die Aufgabe nicht nur ein Keycloak Deployment, sondern auch eine gute Möglichkeit, ein lokales K3s Multi Node Setup mit GitOps, Storage, Secrets und Ingress aufzubauen.
+
+2. Fleet zeigt bei cert-manager einen Drift, weil cert-manager beziehungsweise der Webhook die caBundle Felder automatisch verwaltet. Für Keycloak und PostgreSQL entsteht Drift durch vom Chart erzeugte NetworkPolicies. Die Workloads laufen, aber der GitOps Status ist dadurch nicht vollständig "sauber"
 
 
 # 11. Letzte Validierung
