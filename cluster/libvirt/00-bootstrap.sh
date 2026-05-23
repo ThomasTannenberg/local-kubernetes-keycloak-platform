@@ -15,8 +15,10 @@ PACKAGES=(
   bridge-utils
   cloud-image-utils
   cpu-checker
-  whois          #mkpasswd --> Alternative zu openssl passwd
+  whois
   wget
+  openssh-client
+  openssl
 )
 
 echo "==> Virtualisierungs-Support prüfen"
