@@ -1,6 +1,4 @@
 tmp/
-temp/
-*.tmp
 
 .k3s-bootstrap-token
 **/.k3s-bootstrap-token

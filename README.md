@@ -311,6 +311,7 @@ Der grobe Ablauf beim ersten Erstellen ist:
 6. Änderungen committen und pushen
 7. Fleet synchronisiert die SealedSecret Dateien ins Cluster
 8. Der Sealed Secrets Controller erzeugt daraus die echten Kubernetes Secrets
+9. Den Main Sealed Key mit kubectl auslesen und in .local-secrets legen (ist auf .gitignore)
 ```
 
 Beispiel Keycloak Admin Secret:
@@ -363,6 +364,9 @@ chmod 600 .local-secrets/sealed-secrets-key-backup.yaml
 ```
 
 Diese Datei darf nicht ins Git Repository.
+Aber wenn das cluster ohne den sealed-secrets-key-backup.yaml erstellt worden ist, kommt es zu fehlern.
+Beim cluster Aufbau, während des fleet ansible-playbooks wird der sealed-secret controller erzeugt. 
+Und der private key eingespielt.
 
 Wiederherstellen:
 
@@ -371,10 +375,11 @@ kubectl apply -f .local-secrets/sealed-secrets-key-backup.yaml
 kubectl -n kube-system rollout restart deployment sealed-secrets-controller
 ```
 Wenn kein Key Backup vorhanden ist, müssen die Secrets neu erstellt und erneut mit dem neuen Controller verschlüsselt werden.
-Dabei kommt es aber zu Problemen mit Fleet da die sealed Secrets als modified gelten.
+Danach sollte das gitrepo aktualisiert werden. 
+sonst kommt es zu Problemen mit Fleet da die sealed Secrets als modified gelten.
 
 Am besten die secrets neu erzeugen und ein backup des sealed-secrets-keys anlegen. 
-```
+
 
 ## TLS und Let’s Encrypt
 

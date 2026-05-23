@@ -1,11 +1,11 @@
 postgresql:
   architecture: standalone
-
+ 
   image:
-    registry: registry-1.docker.io
-    repository: bitnami/postgresql
-    tag: latest
-
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: 17.6.0-debian-12-r4
+ 
   auth:
     username: keycloak
     database: keycloak
@@ -13,13 +13,13 @@ postgresql:
     secretKeys:
       userPasswordKey: password
       adminPasswordKey: postgres-password
-
+ 
   primary:
     persistence:
       enabled: true
       storageClass: longhorn
       size: 10Gi
-
+ 
     resources:
       requests:
         cpu: 250m

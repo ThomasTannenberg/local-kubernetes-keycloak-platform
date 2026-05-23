@@ -1688,7 +1688,8 @@ PostgreSQL Admin Passwort
 
 Wichtig ist dabei der Ablauf beim ersten Benutzen.
 
-Die Sealed Secrets Dateien werden nicht automatisch beim ersten Start aus dem Nichts erzeugt. Sie müssen einmal manuell erstellt, mit `kubeseal` verschlüsselt und danach an der richtigen Stelle im Repository abgelegt werden.
+Die Sealed Secrets Dateien werden nicht automatisch beim ersten Start erzeugt. 
+Sie müssen einmal manuell erstellt, mit `kubeseal` verschlüsselt und danach an der richtigen Stelle im Repository abgelegt werden.
 
 ```text
 platform/secrets/
@@ -1702,17 +1703,18 @@ keycloak-database.sealedsecret.yaml
 keycloak-postgresql-auth.sealedsecret.yaml
 ```
 
-Der grobe Ablauf beim ersten Erstellen ist:
+Der Ablauf beim ersten Erstellen ist:
 
 ```text
 1. Normale Kubernetes Secrets lokal mit kubectl erzeugen
-2. Diese Secrets nicht direkt ins Git legen
+2. Diese Secrets nicht ins Git legen!
 3. Die Secrets mit kubeseal gegen den Sealed Secrets Controller verschlüsseln
 4. Die erzeugten SealedSecret Dateien unter platform/secrets ablegen
 5. Die temporären Klartext Secret Dateien wieder löschen
 6. Änderungen committen und pushen
 7. Fleet synchronisiert die SealedSecret Dateien ins Cluster
 8. Der Sealed Secrets Controller erzeugt daraus die echten Kubernetes Secrets
+9. Den Sealed Secrets private key sichern
 ```
 
 Beispiel Keycloak Admin Secret:
@@ -1742,7 +1744,7 @@ rm /tmp/keycloak-admin.secret.yaml
 
 Das gleiche Prinzip gilt für die PostgreSQL und Keycloak Datenbank Secrets.
 
-Wichtig ist außerdem, dass der private Key des Sealed Secrets Controllers gesichert wird.
+Wichtig ist außerdem, dass der private Key des Sealed Secrets Controllers gesichert wird!
 
 Ein SealedSecret ist an den öffentlichen Schlüssel eines bestimmten Sealed Secrets Controllers gebunden. Der passende private Schlüssel liegt im Cluster. Wenn das Cluster neu gebaut wird und dieser private Schlüssel nicht wiederhergestellt wird, können die vorhandenen SealedSecret Dateien nicht mehr entschlüsselt werden.
 
@@ -1824,7 +1826,7 @@ Keycloak über HTTPS
 PostgreSQL als Datenbank
 Sealed Secrets für sensible Werte
 Makefile für Setup, Validierung und Cleanup
-Fleet als GitOps Ansatz
+Fleet als GitOps Ansatz, der sicherlich noch verbessert werden kann. 
 ```
 
 Die wichtigste Einschränkung ist Let’s Encrypt.
