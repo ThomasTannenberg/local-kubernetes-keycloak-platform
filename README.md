@@ -1,11 +1,10 @@
 # Local Kubernetes Keycloak Platform
 
-Dieses Repository enthält ein lokales Kubernetes Setup für die Bewerberaufgabe.
+Dieses Repository enthält ein reproduzierbares lokales Kubernetes Setup für die Bewerberaufgabe.
 
-Ziel ist ein reproduzierbares lokales Kubernetes Cluster mit Keycloak, PostgreSQL, Ingress und TLS.
+Ziel ist ein lokales K3s Multi Node Cluster mit Keycloak, PostgreSQL, Ingress, TLS, persistentem Storage und GitOps Deployment.
 
-
-## Inhalt
+## Komponenten
 
 Verwendete Hauptkomponenten:
 
@@ -26,28 +25,30 @@ Keycloak
 
 ## Architektur
 
-Das lokale Cluster besteht aus sieben VMs.
+Das Setup besteht aus sieben lokalen VMs.
 
 ```text
 k3s-lb-1       192.168.122.10   HAProxy LoadBalancer
 
-k3s-server-1   192.168.122.11   Control Plane 
-k3s-server-2   192.168.122.12   Control Plane 
-k3s-server-3   192.168.122.13   Control Plane 
+k3s-server-1   192.168.122.11   Control Plane
+k3s-server-2   192.168.122.12   Control Plane
+k3s-server-3   192.168.122.13   Control Plane
 
 k3s-agent-1    192.168.122.21   Worker
 k3s-agent-2    192.168.122.22   Worker
 k3s-agent-3    192.168.122.23   Worker
 ```
 
-HAProxy übernimmt zwei Aufgaben:
+HAProxy ist der zentrale Einstiegspunkt.
 
 ```text
 Kubernetes API:
 192.168.122.10:6443 -> K3s Server Nodes
 
-HTTP und HTTPS:
-192.168.122.10:80  -> Traefik NodePort 30080
+HTTP:
+192.168.122.10:80 -> Traefik NodePort 30080
+
+HTTPS:
 192.168.122.10:443 -> Traefik NodePort 30443
 ```
 
@@ -57,7 +58,7 @@ Keycloak ist über Traefik Ingress erreichbar.
 https://keycloak.local.example
 ```
 
-Dafür ist auf dem Host folgender Eintrag notwendig:
+Dafür muss auf dem Host folgender Eintrag gesetzt werden:
 
 ```text
 192.168.122.10 keycloak.local.example
@@ -68,31 +69,39 @@ Dafür ist auf dem Host folgender Eintrag notwendig:
 Benötigte Tools auf dem Host:
 
 ```bash
-ansible 
-kubectl 
-helm 
-virsh 
-virt-install 
-make 
-kubeseal 
-git 
-ssh 
-curl 
-qemu-img 
+ansible
+kubectl
+helm
+virsh
+virt-install
+make
+kubeseal
+git
+ssh
+curl
+qemu-img
 cloud-localds
 ```
 
-Zusätzlich muss KVM/libvirt auf dem Host funktionieren.
+Zusätzlich wird benötigt:
+
+```text
+Linux Host
+KVM/libvirt
+aktivierte CPU Virtualisierung
+libvirt default network
+ausreichend RAM und CPU
+```
 
 ## Installation
 
-Das komplette Setup kann über das Makefile gestartet werden.
+Das komplette Setup wird über das Makefile gestartet.
 
 ```bash
 make install
 ```
 
-Das führt intern diese Schritte aus:
+Dieser Befehl führt intern aus:
 
 ```text
 make vm-create
@@ -167,7 +176,7 @@ URL:
 https://keycloak.local.example
 ```
 
-Admin User:
+Admin Benutzer:
 
 ```text
 admin
@@ -180,71 +189,50 @@ kubectl get secret keycloak-admin -n keycloak \
   -o jsonpath="{.data.admin-password}" | base64 -d; echo
 ```
 
-HTTPS testen:
+HTTPS prüfen:
 
 ```bash
 curl -vk https://keycloak.local.example
 ```
 
-Da lokal ein selbstsigniertes Zertifikat verwendet wird, zeigt der Browser wahrscheinlich eine Zertifikatswarnung. Das ist in diesem Setup erwartet.
+Da dieses lokale Setup ein selbstsigniertes Zertifikat verwendet, zeigt der Browser eine Zertifikatswarnung. Das ist in diesem Setup erwartet.
 
 ## Validierung
 
-Cluster:
+Das Makefile enthält ein Validierungsziel.
+
+```bash
+make validate
+```
+
+Dabei werden unter anderem geprüft:
+
+```text
+Nodes
+Pods
+Fleet Status
+Helm Releases
+Zertifikate
+StorageClasses
+PVCs
+PVs
+Services
+Ingress Ressourcen
+Keycloak HTTPS Zugriff
+```
+
+Wichtige Einzelbefehle:
 
 ```bash
 kubectl get nodes -o wide
-kubectl get namespaces
-kubectl get pods -A -o wide
-```
-
-Fleet:
-
-```bash
-kubectl get gitrepo -A
-kubectl get bundles -n fleet-local
-kubectl get bundledeployments -A
-```
-
-Helm Releases:
-
-```bash
+kubectl get pods -A
+kubectl get gitrepo,bundles,bundledeployments -A
 helm list -A
-```
-
-Storage:
-
-```bash
+kubectl get certificate -A
 kubectl get storageclass
 kubectl get pvc -A
-kubectl get pv
-```
-
-cert-manager:
-
-```bash
-kubectl get pods -n cert-manager
-kubectl get crds | grep cert-manager
-kubectl get clusterissuer
-kubectl get certificate -A
-```
-
-Traefik:
-
-```bash
-kubectl get pods -n traefik
-kubectl get svc -n traefik
-kubectl get ingressclass
-```
-
-Keycloak:
-
-```bash
-kubectl get pods -n keycloak
-kubectl get svc -n keycloak
-kubectl get ingress -n keycloak
-kubectl get certificate -n keycloak
-kubectl logs keycloak-0 -n keycloak
+kubectl get ingress -A
+curl -vk https://keycloak.local.example
 ```
 
 ## Repository Struktur
@@ -257,6 +245,7 @@ kubectl logs keycloak-0 -n keycloak
 │   ├── libvirt/
 │   └── ansible/
 ├── docs/
+│   └── Fragen_beantworten.md
 ├── fleet/
 │   └── gitrepo.yaml
 └── platform/
@@ -270,13 +259,24 @@ kubectl logs keycloak-0 -n keycloak
     └── traefik/
 ```
 
-## Wichtige Hinweise
+Nicht versionierte lokale Dateien:
 
-### Sealed Secrets
+```text
+.local-secrets/
+tmp/
+cluster/ansible/k3s.yaml
+cluster/ansible/.k3s-bootstrap-token
+```
 
-Ich verwende Sealed Secrets, damit sensible Werte nicht im Klartext im Git Repository liegen.
+Diese Dateien dürfen nicht ins Git Repository übernommen werden.
 
-Das betrifft vor allem:
+## Secrets
+
+Sensible Werte werden nicht im Klartext im Repository gespeichert.
+
+Verwendet wird Sealed Secrets.
+
+Betroffene Secrets:
 
 ```text
 Keycloak Admin Passwort
@@ -284,74 +284,23 @@ Keycloak Datenbank Passwort
 PostgreSQL Admin Passwort
 ```
 
-Wichtig ist dabei der Ablauf beim ersten Benutzen.
-
-Die Sealed Secrets Dateien werden nicht automatisch beim ersten Start aus dem Nichts erzeugt. Sie müssen einmal manuell erstellt, mit `kubeseal` verschlüsselt und danach an der richtigen Stelle im Repository abgelegt werden.
+Die verschlüsselten SealedSecret Dateien liegen unter:
 
 ```text
 platform/secrets/
 ```
 
-Aktuelle Dateien:
+Der Sealed Secrets Controller läuft im Namespace:
 
 ```text
-keycloak-admin.sealedsecret.yaml
-keycloak-database.sealedsecret.yaml
-keycloak-postgresql-auth.sealedsecret.yaml
+kube-system
 ```
 
-Der grobe Ablauf beim ersten Erstellen ist:
+Wichtig:
 
-```text
-1. Normale Kubernetes Secrets lokal mit kubectl erzeugen
-2. Diese Secrets nicht direkt ins Git legen
-3. Die Secrets mit kubeseal gegen den Sealed Secrets Controller verschlüsseln
-4. Die erzeugten SealedSecret Dateien unter platform/secrets ablegen
-5. Die temporären Klartext Secret Dateien wieder löschen
-6. Änderungen committen und pushen
-7. Fleet synchronisiert die SealedSecret Dateien ins Cluster
-8. Der Sealed Secrets Controller erzeugt daraus die echten Kubernetes Secrets
-9. Den Main Sealed Key mit kubectl auslesen und in .local-secrets legen (ist auf .gitignore)
-```
+Ein SealedSecret ist an den öffentlichen Schlüssel eines bestimmten Sealed Secrets Controllers gebunden. Wenn das Cluster neu erstellt wird und der alte private Schlüssel nicht wiederhergestellt wird, können vorhandene SealedSecret Dateien nicht mehr entschlüsselt werden.
 
-Beispiel Keycloak Admin Secret:
-
-```bash
-kubectl -n keycloak create secret generic keycloak-admin \
-  --from-literal=admin-password='KEYCLOAK_ADMIN_PASSWORT' \
-  --dry-run=client -o yaml > /tmp/keycloak-admin.secret.yaml
-```
-
-Danach versiegeln:
-
-```bash
-kubeseal \
-  --controller-name sealed-secrets-controller \
-  --controller-namespace kube-system \
-  --format yaml \
-  < /tmp/keycloak-admin.secret.yaml \
-  > platform/secrets/keycloak-admin.sealedsecret.yaml
-```
-
-Danach die Klartext Datei löschen:
-
-```bash
-rm /tmp/keycloak-admin.secret.yaml
-```
-
-Das gleiche Prinzip gilt für die PostgreSQL und Keycloak Datenbank Secrets.
-
-Wichtig ist außerdem, dass der private Key des Sealed Secrets Controllers gesichert wird.
-
-Ein SealedSecret ist an den öffentlichen Schlüssel eines bestimmten Sealed Secrets Controllers gebunden. Der passende private Schlüssel liegt im Cluster. Wenn das Cluster neu gebaut wird und dieser private Schlüssel nicht wiederhergestellt wird, können die vorhandenen SealedSecret Dateien nicht mehr entschlüsselt werden.
-
-Typischer Fehler:
-
-```text
-no key could decrypt secret
-```
-
-Deshalb sichere ich den Sealed Secrets Key lokal:
+Der private Schlüssel des Sealed Secrets Controllers muss daher lokal gesichert werden.
 
 ```bash
 mkdir -p .local-secrets
@@ -364,22 +313,6 @@ chmod 600 .local-secrets/sealed-secrets-key-backup.yaml
 ```
 
 Diese Datei darf nicht ins Git Repository.
-Aber wenn das cluster ohne den sealed-secrets-key-backup.yaml erstellt worden ist, kommt es zu fehlern.
-Beim cluster Aufbau, während des fleet ansible-playbooks wird der sealed-secret controller erzeugt. 
-Und der private key eingespielt.
-
-Wiederherstellen:
-
-```bash
-kubectl apply -f .local-secrets/sealed-secrets-key-backup.yaml
-kubectl -n kube-system rollout restart deployment sealed-secrets-controller
-```
-Wenn kein Key Backup vorhanden ist, müssen die Secrets neu erstellt und erneut mit dem neuen Controller verschlüsselt werden.
-Danach sollte das gitrepo aktualisiert werden. 
-sonst kommt es zu Problemen mit Fleet da die sealed Secrets als modified gelten.
-
-Am besten die secrets neu erzeugen und ein backup des sealed-secrets-keys anlegen. 
-
 
 ## TLS und Let’s Encrypt
 
@@ -393,11 +326,30 @@ Let’s Encrypt kann diese Domain nicht öffentlich validieren.
 Es gibt keine DNS Challenge mit echtem DNS Provider.
 ```
 
-Deshalb wird lokal ein selfsigned ClusterIssuer über cert-manager genutzt.
+Deshalb wird lokal ein selfsigned ClusterIssuer über cert-manager verwendet.
 
-Für eine produktionsnahe Umgebung würde ich Let’s Encrypt über DNS-01 oder HTTP-01 mit echter Domain verwenden.
+In einer produktionsnahen Umgebung würde Let’s Encrypt über DNS-01 oder HTTP-01 mit echter Domain verwendet werden.
 
-## Weitere Dokumentation
+## Wichtige Hinweise
+
+Das Setup ist bewusst umfangreicher als ein einfaches Single Node Lab.
+
+Es nutzt:
+
+```text
+mehrere Control Plane Nodes
+mehrere Worker Nodes
+HAProxy als Einstiegspunkt
+Traefik als Ingress Controller
+Longhorn für persistenten Storage
+PostgreSQL als separate Datenbank
+Fleet für GitOps
+Sealed Secrets für sensible Werte
+```
+
+Für kleinere lokale Tests wäre ein Single Node Setup mit kind oder minikube einfacher.
+
+## Weiterführende Dokumentation
 
 Die ausführliche Beantwortung der Bewerberaufgabe liegt unter:
 
@@ -405,16 +357,4 @@ Die ausführliche Beantwortung der Bewerberaufgabe liegt unter:
 docs/Fragen_beantworten.md
 ```
 
-Dort sind die Entscheidungen, Einschränkungen, Validierung und Troubleshooting ausführlicher beschrieben.
-
-## Cleanup
-
-Das gesamte Setup kann wieder entfernt werden mit:
-
-```bash
-make cleanup
-```
-
-Dabei werden das K3s Cluster und die VMs entfernt.
-
-Das Ubuntu Cloud Image bleibt standardmäßig erhalten. Wenn es ebenfalls gelöscht werden soll, kann das Cleanup Skript mit `REMOVE_BASE_IMAGE=1` gestartet werden.
+Dort sind Architekturentscheidungen, Einschränkungen, Validierung und Troubleshooting ausführlicher beschrieben.
