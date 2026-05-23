@@ -7,7 +7,7 @@ Dieses Dokument beschreibt mein lokales Kubernetes Setup für die Bewerberaufgab
 
 Ich habe mich für K3s entschieden.
 
-In der Vergangenheit habe ich private Setups zum Lernen und Testen mit minikube aufgebaut. Minikube hätte die Anforderungen der Aufgabeebenfalls erfüllt.
+In der Vergangenheit habe ich private Setups zum Lernen und Testen mit minikube aufgebaut. Minikube hätte die Anforderungen der Aufgabe ebenfalls erfüllt.
 Für diese Aufgabe wollte ich aber ein Setup erstellen, welches näher an einer produktionsnahen Kubernetes Umgebung liegt. 
 Deshalb verwende ich K3s auf mehreren lokalen virtuellen Maschinen.
 
@@ -15,7 +15,7 @@ Verwendete Versionen und Grundkomponenten:
 
 
 Kubernetes Distribution: K3s
-Kubernetes Version: v1.35.4+k3s1
+Kubernetes Version: v1.35.5+k3s1
 Host OS: Ubuntu 26.04 LTS
 VM OS: Ubuntu 22.04.5 LTS
 Container Runtime: containerd://2.2.3-k3s1
@@ -89,7 +89,7 @@ Das Base Image bleibt standardmäßig erhalten. Wenn es ebenfalls gelöscht werd
 REMOVE_BASE_IMAGE=1 ./99-cleanup.sh
 
 
-Die VMs sind werden so angelegt:
+Die VMs werden so angelegt:
 
 | Host | IP | MAC | RAM | vCPU | Disk |
 |---|---|---|---:|---:|---:|
@@ -430,6 +430,8 @@ Admin Passwörter, Datenbankpasswörter und andere sensible Werte liegen nicht i
 
 Ich verwende dafür Sealed Secrets.
 
+Der Sealed Secrets Controller wird nicht manuell installiert. 
+Nach dem Cluster Bootstrap installiert Ansible Fleet. Fleet synchronisiert anschließend den Pfad platform/sealed-secrets aus dem Repository. Dort liegt ein Helm Wrapper Chart für Sealed Secrets. Dieses Helm Release installiert den Sealed Secrets Controller im Namespace kube-system. Erst danach werden die verschlüsselten SealedSecret Ressourcen aus platform/secrets angewendet.
 Der Sealed Secrets Controller läuft im Namespace:
 
 ```text
@@ -878,7 +880,7 @@ cert-manager:
 ```
 
 Die CRDs sind notwendig, damit Ressourcen wie ClusterIssuer und Certificate verwendet werden können.
-Da ich kein Monitoring habe ist Prometheus deinstalliert. 
+Da ich kein Monitoring habe ist Prometheus dektiviert.
 
 Validierung:
 
@@ -1691,6 +1693,8 @@ Wichtig ist dabei der Ablauf beim ersten Benutzen.
 Die Sealed Secrets Dateien werden nicht automatisch beim ersten Start erzeugt. 
 Sie müssen einmal manuell erstellt, mit `kubeseal` verschlüsselt und danach an der richtigen Stelle im Repository abgelegt werden.
 
+
+
 ```text
 platform/secrets/
 ```
@@ -1746,7 +1750,7 @@ Das gleiche Prinzip gilt für die PostgreSQL und Keycloak Datenbank Secrets.
 
 Wichtig ist außerdem, dass der private Key des Sealed Secrets Controllers gesichert wird!
 
-Ein SealedSecret ist an den öffentlichen Schlüssel eines bestimmten Sealed Secrets Controllers gebunden. Der passende private Schlüssel liegt im Cluster. Wenn das Cluster neu gebaut wird und dieser private Schlüssel nicht wiederhergestellt wird, können die vorhandenen SealedSecret Dateien nicht mehr entschlüsselt werden.
+Der Controller kann nur SealedSecret Ressourcen entschlüsseln, die mit seinem öffentlichen Schlüssel versiegelt wurden. Nach einem Cluster Neuaufbau erzeugt der Controller normalerweise ein neues Schlüsselpaar. Ohne Wiederherstellung des alten privaten Schlüssels können bereits vorhandene SealedSecret Dateien nicht mehr entschlüsselt werden.
 
 Typischer Fehler:
 
@@ -1833,4 +1837,200 @@ Die wichtigste Einschränkung ist Let’s Encrypt.
 
 Da das Setup lokal ist und keine öffentliche Domain verwendet wird, kann Let’s Encrypt die Domain nicht validieren. Deshalb verwende ich lokal einen selfsigned ClusterIssuer über cert-manager und beschreibe zusätzlich, wie es mit echter Domain funktionieren würde.
 
+Fleet zeigt bei cert-manager einen erwarteten Drift, weil cert-manager beziehungsweise der Webhook die caBundle Felder automatisch verwaltet. Für Keycloak und PostgreSQL entsteht Drift durch vom Chart erzeugte NetworkPolicies. Die Workloads laufen, aber der GitOps Status ist dadurch nicht vollständig Ready.
+
 Für mich war die Aufgabe nicht nur ein Keycloak Deployment, sondern auch eine gute Möglichkeit, ein lokales K3s Multi Node Setup mit GitOps, Storage, Secrets und Ingress aufzubauen.
+
+
+# 11. Letzte Validierung
+------------------------- Nodes ----------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get nodes -o wide
+NAME           STATUS   ROLES                AGE   VERSION        INTERNAL-IP      EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION       CONTAINER-RUNTIME
+k3s-agent-1    Ready    worker               23m   v1.35.5+k3s1   192.168.122.21   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
+k3s-agent-2    Ready    worker               22m   v1.35.5+k3s1   192.168.122.22   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
+k3s-agent-3    Ready    worker               22m   v1.35.5+k3s1   192.168.122.23   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
+k3s-server-1   Ready    control-plane,etcd   24m   v1.35.5+k3s1   192.168.122.11   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
+k3s-server-2   Ready    control-plane,etcd   23m   v1.35.5+k3s1   192.168.122.12   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
+k3s-server-3   Ready    control-plane,etcd   23m   v1.35.5+k3s1   192.168.122.13   <none>        Ubuntu 22.04.5 LTS   5.15.0-173-generic   containerd://2.2.3-k3s1
+------------------------- Pods -----------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get pods -A
+NAMESPACE             NAME                                                READY   STATUS    RESTARTS      AGE
+cattle-fleet-system   fleet-agent-5b7c659d98-ng4v5                        1/1     Running   0             22m
+cattle-fleet-system   fleet-controller-5498b56dfd-5g5t7                   3/3     Running   0             22m
+cattle-fleet-system   gitjob-559c4f89cc-cj49v                             1/1     Running   0             22m
+cattle-fleet-system   helmops-6d86c9fb7b-gfhh5                            1/1     Running   0             22m
+cert-manager          cert-manager-65b765f58f-7wr9j                       1/1     Running   0             21m
+cert-manager          cert-manager-cainjector-679cdbbb5c-mstp7            1/1     Running   0             21m
+cert-manager          cert-manager-webhook-75bbd7d54f-b49ls               1/1     Running   0             21m
+keycloak              keycloak-0                                          1/1     Running   0             18m
+kube-system           coredns-8db54c48d-h4pxj                             1/1     Running   0             24m
+kube-system           local-path-provisioner-5d9d9885bc-lwbnx             1/1     Running   0             24m
+kube-system           metrics-server-786d997795-xbxgl                     1/1     Running   0             24m
+kube-system           sealed-secrets-controller-6c6459f975-4mmg9          1/1     Running   0             21m
+longhorn-system       csi-attacher-5557d89ccf-79nxq                       1/1     Running   0             19m
+longhorn-system       csi-attacher-5557d89ccf-kgsdr                       1/1     Running   0             19m
+longhorn-system       csi-attacher-5557d89ccf-lqksb                       1/1     Running   0             19m
+longhorn-system       csi-provisioner-857485dbfb-8j7tn                    1/1     Running   0             19m
+longhorn-system       csi-provisioner-857485dbfb-jqrg4                    1/1     Running   0             19m
+longhorn-system       csi-provisioner-857485dbfb-vzwdd                    1/1     Running   0             19m
+longhorn-system       csi-resizer-64dcb47b78-9rwvh                        1/1     Running   0             19m
+longhorn-system       csi-resizer-64dcb47b78-dbpld                        1/1     Running   0             19m
+longhorn-system       csi-resizer-64dcb47b78-wstpz                        1/1     Running   0             19m
+longhorn-system       csi-snapshotter-9dc596c7c-66qxm                     1/1     Running   0             19m
+longhorn-system       csi-snapshotter-9dc596c7c-kkhrp                     1/1     Running   0             19m
+longhorn-system       csi-snapshotter-9dc596c7c-twbpr                     1/1     Running   0             19m
+longhorn-system       engine-image-ei-c9fa6d45-gmzjb                      1/1     Running   0             20m
+longhorn-system       engine-image-ei-c9fa6d45-qrbd5                      1/1     Running   0             20m
+longhorn-system       engine-image-ei-c9fa6d45-zbwbr                      1/1     Running   0             20m
+longhorn-system       instance-manager-4b471b7c06492de82ed1fa005d31db27   1/1     Running   0             20m
+longhorn-system       instance-manager-e0153fa1d335aa41faa0c28cf653109a   1/1     Running   0             20m
+longhorn-system       instance-manager-eae13c6e1aed9de84ba16bac3f5ec1eb   1/1     Running   0             20m
+longhorn-system       longhorn-csi-plugin-2wrjh                           3/3     Running   0             19m
+longhorn-system       longhorn-csi-plugin-6dzgk                           3/3     Running   0             19m
+longhorn-system       longhorn-csi-plugin-rzwsp                           3/3     Running   0             19m
+longhorn-system       longhorn-driver-deployer-7f5b6fb9b8-js2l6           1/1     Running   0             20m
+longhorn-system       longhorn-manager-56wnq                              2/2     Running   1 (20m ago)   20m
+longhorn-system       longhorn-manager-g2vml                              2/2     Running   0             20m
+longhorn-system       longhorn-manager-qctjk                              2/2     Running   1 (20m ago)   20m
+longhorn-system       longhorn-ui-7fb5c57b8b-5525h                        1/1     Running   0             20m
+longhorn-system       longhorn-ui-7fb5c57b8b-chrsh                        1/1     Running   0             20m
+postgresql            postgresql-0                                        1/1     Running   0             20m
+traefik               traefik-775f4fffdc-n27dq                            1/1     Running   0             20m
+traefik               traefik-775f4fffdc-tzk8c                            1/1     Running   0             20m
+------------------------- Fleet ----------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get gitrepo,bundles,bundledeployments -A
+NAMESPACE     NAME                                              REPO                                                                         COMMIT                                     BUNDLEDEPLOYMENTS-READY   STATUS
+fleet-local   gitrepo.fleet.cattle.io/local-keycloak-platform   https://github.com/ThomasTannenberg/local-kubernetes-keycloak-platform.git   f140d48371af49812285261fa7309533f8f89dab   5/8                       Modified(1) [Cluster fleet-local/local]; mutatingwebhookconfiguration.admissionregistration.k8s.io cert-manager-webhook modified {"webhooks":[{"admissionReviewVersions":["v1"],"clientConfig":{"caBundle":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ4VENDQVV1Z0F3SUJBZ0lVY3ZybWJ6dVVKMXEyUVNBKzVxbzkrc3VFdGVzd0NnWUlLb1pJemowRUF3TXcKSWpFZ01CNEdBMVVFQXhNWFkyVnlkQzF0WVc1aFoyVnlMWGRsWW1odmIyc3RZMkV3SGhjTk1qWXdOVEl6TVRBeApOak00V2hjTk1qY3dOVEl6TVRBeE5qTTRXakFpTVNBd0hnWURWUVFERXhkalpYSjBMVzFoYm1GblpYSXRkMlZpCmFHOXZheTFqWVRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCS0VoTWUySktHZ0xWMm1JamRFWVNQNjQKanJpWlU3NVdCMlQ2aENzRnhtY0dYQytTZ0w0SElJeGkxYW1ReDRCZnZ2VFdnL2VjRG5oa1BPR3dSS0V4dUptLwphMjFrdGJiY0NKenF6T1RtUTBCUGZDaXM2SGF2UFowOWZDdVNCV1BpLzZOQ01FQXdEZ1lEVlIwUEFRSC9CQVFECkFnS2tNQThHQTFVZEV3RUIvd1FGTUFNQkFmOHdIUVlEVlIwT0JCWUVGQXprK0Y0M3hoZEVTSXdDNU5va3F0SHEKeFV0dE1Bb0dDQ3FHU000OUJBTURBMmdBTUdVQ01GelpRd3ZGZnhQanJZR2M0anUrRXZPTG5rVGsrMW9tamxZeQpzb1NIMW9FbExMK1A1U1Y4ZzhtYWJ0NVBOUEprTkFJeEFQZ0owM2s4c0VmUmN3eVRvTmNmUFBGK01vVnJhSEo4CkY2bE1sb3pBenQrTmJ3SzE1cEtUYnJFdkxmRU52VFBQc3c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==","service":{"name":"cert-manager-webhook","namespace":"cert-manager","path":"/mutate","port":443}},"failurePolicy":"Fail","matchPolicy":"Equivalent","name":"webhook.cert-manager.io","namespaceSelector":{},"objectSelector":{},"reinvocationPolicy":"Never","rules":[{"apiGroups":["cert-manager.io"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["certificaterequests"]}],"sideEffects":"None","timeoutSeconds":30}]}; validatingwebhookconfiguration.admissionregistration.k8s.io cert-manager-webhook modified {"webhooks":[{"admissionReviewVersions":["v1"],"clientConfig":{"caBundle":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ4VENDQVV1Z0F3SUJBZ0lVY3ZybWJ6dVVKMXEyUVNBKzVxbzkrc3VFdGVzd0NnWUlLb1pJemowRUF3TXcKSWpFZ01CNEdBMVVFQXhNWFkyVnlkQzF0WVc1aFoyVnlMWGRsWW1odmIyc3RZMkV3SGhjTk1qWXdOVEl6TVRBeApOak00V2hjTk1qY3dOVEl6TVRBeE5qTTRXakFpTVNBd0hnWURWUVFERXhkalpYSjBMVzFoYm1GblpYSXRkMlZpCmFHOXZheTFqWVRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCS0VoTWUySktHZ0xWMm1JamRFWVNQNjQKanJpWlU3NVdCMlQ2aENzRnhtY0dYQytTZ0w0SElJeGkxYW1ReDRCZnZ2VFdnL2VjRG5oa1BPR3dSS0V4dUptLwphMjFrdGJiY0NKenF6T1RtUTBCUGZDaXM2SGF2UFowOWZDdVNCV1BpLzZOQ01FQXdEZ1lEVlIwUEFRSC9CQVFECkFnS2tNQThHQTFVZEV3RUIvd1FGTUFNQkFmOHdIUVlEVlIwT0JCWUVGQXprK0Y0M3hoZEVTSXdDNU5va3F0SHEKeFV0dE1Bb0dDQ3FHU000OUJBTURBMmdBTUdVQ01GelpRd3ZGZnhQanJZR2M0anUrRXZPTG5rVGsrMW9tamxZeQpzb1NIMW9FbExMK1A1U1Y4ZzhtYWJ0NVBOUEprTkFJeEFQZ0owM2s4c0VmUmN3eVRvTmNmUFBGK01vVnJhSEo4CkY2bE1sb3pBenQrTmJ3SzE1cEtUYnJFdkxmRU52VFBQc3c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==","service":{"name":"cert-manager-webhook","namespace":"cert-manager","path":"/validate","port":443}},"failurePolicy":"Fail","matchPolicy":"Equivalent","name":"webhook.cert-manager.io","namespaceSelector":{"matchExpressions":[{"key":"cert-manager.io/disable-validation","operator":"NotIn","values":["true"]}]},"objectSelector":{},"rules":[{"apiGroups":["cert-manager.io","acme.cert-manager.io"],"apiVersions":["v1"],"operations":["CREATE","UPDATE"],"resources":["*/*"]}],"sideEffects":"None","timeoutSeconds":30}]}
+
+NAMESPACE     NAME                                                                          BUNDLEDEPLOYMENTS-READY   STATUS
+fleet-local   bundle.fleet.cattle.io/fleet-agent-local                                      1/1                       
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-cert-manager          0/1                       Modified(1) [Cluster fleet-local/local]; mutatingwebhookconfiguration.admissionregistration.k8s.io cert-manager-webhook modified {"webhooks":[{"admissionReviewVersions":["v1"],"clientConfig":{"caBundle":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ4VENDQVV1Z0F3SUJBZ0lVY3ZybWJ6dVVKMXEyUVNBKzVxbzkrc3VFdGVzd0NnWUlLb1pJemowRUF3TXcKSWpFZ01CNEdBMVVFQXhNWFkyVnlkQzF0WVc1aFoyVnlMWGRsWW1odmIyc3RZMkV3SGhjTk1qWXdOVEl6TVRBeApOak00V2hjTk1qY3dOVEl6TVRBeE5qTTRXakFpTVNBd0hnWURWUVFERXhkalpYSjBMVzFoYm1GblpYSXRkMlZpCmFHOXZheTFqWVRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCS0VoTWUySktHZ0xWMm1JamRFWVNQNjQKanJpWlU3NVdCMlQ2aENzRnhtY0dYQytTZ0w0SElJeGkxYW1ReDRCZnZ2VFdnL2VjRG5oa1BPR3dSS0V4dUptLwphMjFrdGJiY0NKenF6T1RtUTBCUGZDaXM2SGF2UFowOWZDdVNCV1BpLzZOQ01FQXdEZ1lEVlIwUEFRSC9CQVFECkFnS2tNQThHQTFVZEV3RUIvd1FGTUFNQkFmOHdIUVlEVlIwT0JCWUVGQXprK0Y0M3hoZEVTSXdDNU5va3F0SHEKeFV0dE1Bb0dDQ3FHU000OUJBTURBMmdBTUdVQ01GelpRd3ZGZnhQanJZR2M0anUrRXZPTG5rVGsrMW9tamxZeQpzb1NIMW9FbExMK1A1U1Y4ZzhtYWJ0NVBOUEprTkFJeEFQZ0owM2s4c0VmUmN3eVRvTmNmUFBGK01vVnJhSEo4CkY2bE1sb3pBenQrTmJ3SzE1cEtUYnJFdkxmRU52VFBQc3c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==","service":{"name":"cert-manager-webhook","namespace":"cert-manager","path":"/mutate","port":443}},"failurePolicy":"Fail","matchPolicy":"Equivalent","name":"webhook.cert-manager.io","namespaceSelector":{},"objectSelector":{},"reinvocationPolicy":"Never","rules":[{"apiGroups":["cert-manager.io"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["certificaterequests"]}],"sideEffects":"None","timeoutSeconds":30}]}; validatingwebhookconfiguration.admissionregistration.k8s.io cert-manager-webhook modified {"webhooks":[{"admissionReviewVersions":["v1"],"clientConfig":{"caBundle":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ4VENDQVV1Z0F3SUJBZ0lVY3ZybWJ6dVVKMXEyUVNBKzVxbzkrc3VFdGVzd0NnWUlLb1pJemowRUF3TXcKSWpFZ01CNEdBMVVFQXhNWFkyVnlkQzF0WVc1aFoyVnlMWGRsWW1odmIyc3RZMkV3SGhjTk1qWXdOVEl6TVRBeApOak00V2hjTk1qY3dOVEl6TVRBeE5qTTRXakFpTVNBd0hnWURWUVFERXhkalpYSjBMVzFoYm1GblpYSXRkMlZpCmFHOXZheTFqWVRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCS0VoTWUySktHZ0xWMm1JamRFWVNQNjQKanJpWlU3NVdCMlQ2aENzRnhtY0dYQytTZ0w0SElJeGkxYW1ReDRCZnZ2VFdnL2VjRG5oa1BPR3dSS0V4dUptLwphMjFrdGJiY0NKenF6T1RtUTBCUGZDaXM2SGF2UFowOWZDdVNCV1BpLzZOQ01FQXdEZ1lEVlIwUEFRSC9CQVFECkFnS2tNQThHQTFVZEV3RUIvd1FGTUFNQkFmOHdIUVlEVlIwT0JCWUVGQXprK0Y0M3hoZEVTSXdDNU5va3F0SHEKeFV0dE1Bb0dDQ3FHU000OUJBTURBMmdBTUdVQ01GelpRd3ZGZnhQanJZR2M0anUrRXZPTG5rVGsrMW9tamxZeQpzb1NIMW9FbExMK1A1U1Y4ZzhtYWJ0NVBOUEprTkFJeEFQZ0owM2s4c0VmUmN3eVRvTmNmUFBGK01vVnJhSEo4CkY2bE1sb3pBenQrTmJ3SzE1cEtUYnJFdkxmRU52VFBQc3c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==","service":{"name":"cert-manager-webhook","namespace":"cert-manager","path":"/validate","port":443}},"failurePolicy":"Fail","matchPolicy":"Equivalent","name":"webhook.cert-manager.io","namespaceSelector":{"matchExpressions":[{"key":"cert-manager.io/disable-validation","operator":"NotIn","values":["true"]}]},"objectSelector":{},"rules":[{"apiGroups":["cert-manager.io","acme.cert-manager.io"],"apiVersions":["v1"],"operations":["CREATE","UPDATE"],"resources":["*/*"]}],"sideEffects":"None","timeoutSeconds":30}]}
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-cert-manager-issuer   1/1                       
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-keycloak              0/1                       Modified(1) [Cluster fleet-local/local]; networkpolicy.networking.k8s.io keycloak/keycloak modified {"spec":{"ingress":[{"ports":[{"port":8080},{"port":7800}]}]}}
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-longhorn              1/1                       
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-postgresql            0/1                       Modified(1) [Cluster fleet-local/local]; networkpolicy.networking.k8s.io postgresql/postgresql modified {"spec":{"ingress":[{"ports":[{"port":5432}]}]}}
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-sealed-secrets        1/1                       
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-secrets               1/1                       
+fleet-local   bundle.fleet.cattle.io/local-keycloak-platform-platform-traefik               1/1                       
+
+NAMESPACE                                NAME                                                                                    DEPLOYED   MONITORED   STATUS
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/fleet-agent-local                                      True       True        
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-cert-manager          True       True        mutatingwebhookconfiguration.admissionregistration.k8s.io cert-manager-webhook modified {"webhooks":[{"admissionReviewVersions":["v1"],"clientConfig":{"caBundle":"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ4VENDQVV1Z0F3SUJBZ0lVY3ZybWJ6dVVKMXEyUVNBKzVxbzkrc3VFdGVzd0NnWUlLb1pJemowRUF3TXcKSWpFZ01CNEdBMVVFQXhNWFkyVnlkQzF0WVc1aFoyVnlMWGRsWW1odmIyc3RZMkV3SGhjTk1qWXdOVEl6TVRBeApOak00V2hjTk1qY3dOVEl6TVRBeE5qTTRXakFpTVNBd0hnWURWUVFERXhkalpYSjBMVzFoYm1GblpYSXRkMlZpCmFHOXZheTFqWVRCMk1CQUdCeXFHU000OUFnRUdCU3VCQkFBaUEySUFCS0VoTWUySktHZ0xWMm1JamRFWVNQNjQKanJpWlU3NVdCMlQ2aENzRnhtY0dYQytTZ0w0SElJeGkxYW1ReDRCZnZ2VFdnL2VjRG5oa1BPR3dSS0V4dUptLwphMjFrdGJiY0NKenF6T1RtUTBCUGZDaXM2SGF2UFowOWZDdVNCV1BpLzZOQ01FQXdEZ1lEVlIwUEFRSC9CQVFECkFnS2tNQThHQTFVZEV3RUIvd1FGTUFNQkFmOHdIUVlEVlIwT0JCWUVGQXprK0Y0M3hoZEVTSXdDNU5va3F0SHEKeFV0dE1Bb0dDQ3FHU000OUJBTURBMmdBTUdVQ01GelpRd3ZGZnhQanJZR2M0anUrRXZPTG5rVGsrMW9tamxZeQpzb1NIMW9FbExMK1A1U1Y4ZzhtYWJ0NVBOUEprTkFJeEFQZ0owM2s4c0VmUmN3eVRvTmNmUFBGK01vVnJhSEo4CkY2bE1sb3pBenQrTmJ3SzE1cEtUYnJFdkxmRU52VFBQc3c9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==","service":{"name":"cert-manager-webhook","namespace":"cert-manager","path":"/mutate","port":443}},"failurePolicy":"Fail","matchPolicy":"Equivalent","name":"webhook.cert-manager.io","namespaceSelector":{},"objectSelector":{},"reinvocationPolicy":"Never","rules":[{"apiGroups":["cert-manager.io"],"apiVersions":["v1"],"operations":["CREATE"],"resources":["certificaterequests"]}],"sideEffects":"None","timeoutSeconds":30}]}
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-cert-manager-issuer   True       True        
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-keycloak              True       True        networkpolicy.networking.k8s.io keycloak/keycloak modified {"spec":{"ingress":[{"ports":[{"port":8080},{"port":7800}]}]}}
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-longhorn              True       True        
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-postgresql            True       True        networkpolicy.networking.k8s.io postgresql/postgresql modified {"spec":{"ingress":[{"ports":[{"port":5432}]}]}}
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-sealed-secrets        True       True        
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-secrets               True       True        
+cluster-fleet-local-local-1a3d67d0a899   bundledeployment.fleet.cattle.io/local-keycloak-platform-platform-traefik               True       True        
+------------------------- Helm -----------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml helm list -A
+NAME                                                	NAMESPACE          	REVISION	UPDATED                                 	STATUS  	CHART                                                                                   	APP VERSION
+cert-manager                                        	cert-manager       	1       	2026-05-23 10:16:32.062968912 +0000 UTC 	deployed	cert-manager-wrapper-0.1.0                                                              	           
+fleet                                               	cattle-fleet-system	1       	2026-05-23 12:15:30.351781197 +0200 CEST	deployed	fleet-0.15.2                                                                            	0.15.2     
+fleet-agent-local                                   	cattle-fleet-system	1       	2026-05-23 10:16:31.851336532 +0000 UTC 	deployed	fleet-agent-local-v0.0.0+s-2fc8b0dae8742013f60e7f0d45cc875ea0af7c7c0b743e47fbce82511abb0	           
+fleet-crd                                           	cattle-fleet-system	1       	2026-05-23 12:15:27.522094823 +0200 CEST	deployed	fleet-crd-0.15.2                                                                        	0.15.2     
+keycloak                                            	keycloak           	1       	2026-05-23 10:19:17.467177617 +0000 UTC 	deployed	keycloak-wrapper-0.1.0                                                                  	           
+local-keycloak-platform-platform-cert-manager-issuer	cert-manager       	1       	2026-05-23 10:17:01.692770321 +0000 UTC 	deployed	local-keycloak-platform-platform-cert-manager-issuer-v0.0.0+git-f140d48371af            	           
+local-keycloak-platform-platform-secrets            	default            	1       	2026-05-23 10:17:01.664589719 +0000 UTC 	deployed	local-keycloak-platform-platform-secrets-v0.0.0+git-f140d48371af                        	           
+longhorn                                            	longhorn-system    	1       	2026-05-23 10:17:16.733476044 +0000 UTC 	deployed	longhorn-wrapper-0.1.0                                                                  	           
+postgresql                                          	postgresql         	1       	2026-05-23 10:18:01.843118364 +0000 UTC 	deployed	postgresql-wrapper-0.1.0                                                                	           
+sealed-secrets                                      	kube-system        	1       	2026-05-23 10:16:31.911690576 +0000 UTC 	deployed	sealed-secrets-wrapper-0.1.0                                                            	           
+traefik                                             	traefik            	1       	2026-05-23 10:17:19.797232167 +0000 UTC 	deployed	traefik-wrapper-0.1.0                                                                   	           
+------------------------- Certificates ---------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get certificate -A
+NAMESPACE   NAME                         READY   SECRET                       AGE
+keycloak    keycloak.local.example-tls   True    keycloak.local.example-tls   18m
+------------------------- StorageClass ---------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get storageclass
+NAME                   PROVISIONER             RECLAIMPOLICY   VOLUMEBINDINGMODE      ALLOWVOLUMEEXPANSION   AGE
+local-path (default)   rancher.io/local-path   Delete          WaitForFirstConsumer   false                  24m
+longhorn               driver.longhorn.io      Retain          Immediate              true                   20m
+longhorn-static        driver.longhorn.io      Delete          Immediate              true                   20m
+------------------------- PVC ------------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get pvc -A
+NAMESPACE    NAME                STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+postgresql   data-postgresql-0   Bound    pvc-584c8df7-a60b-4e06-abab-2c82db68e724   10Gi       RWO            longhorn       <unset>                 20m
+------------------------- PV -------------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get pv
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                          STORAGECLASS   VOLUMEATTRIBUTESCLASS   REASON   AGE
+pvc-584c8df7-a60b-4e06-abab-2c82db68e724   10Gi       RWO            Retain           Bound    postgresql/data-postgresql-0   longhorn       <unset>                          19m
+------------------------- Services -------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get svc -A
+NAMESPACE             NAME                                TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                      AGE
+cattle-fleet-system   gitjob                              ClusterIP   10.43.72.84     <none>        80/TCP                       22m
+cattle-fleet-system   monitoring-fleet-controller         ClusterIP   10.43.199.217   <none>        8080/TCP                     22m
+cattle-fleet-system   monitoring-gitjob                   ClusterIP   10.43.31.13     <none>        8081/TCP                     22m
+cert-manager          cert-manager-webhook                ClusterIP   10.43.168.20    <none>        443/TCP                      21m
+default               kubernetes                          ClusterIP   10.43.0.1       <none>        443/TCP                      24m
+keycloak              keycloak                            ClusterIP   10.43.123.154   <none>        80/TCP                       18m
+keycloak              keycloak-headless                   ClusterIP   None            <none>        8080/TCP                     18m
+kube-system           kube-dns                            ClusterIP   10.43.0.10      <none>        53/UDP,53/TCP,9153/TCP       24m
+kube-system           metrics-server                      ClusterIP   10.43.124.158   <none>        443/TCP                      24m
+kube-system           sealed-secrets-controller           ClusterIP   10.43.104.176   <none>        8080/TCP                     21m
+kube-system           sealed-secrets-controller-metrics   ClusterIP   10.43.112.191   <none>        8081/TCP                     21m
+longhorn-system       longhorn-admission-webhook          ClusterIP   10.43.86.214    <none>        9502/TCP                     20m
+longhorn-system       longhorn-backend                    ClusterIP   10.43.147.146   <none>        9500/TCP                     20m
+longhorn-system       longhorn-frontend                   ClusterIP   10.43.220.70    <none>        80/TCP                       20m
+longhorn-system       longhorn-recovery-backend           ClusterIP   10.43.241.71    <none>        9503/TCP                     20m
+postgresql            postgresql                          ClusterIP   10.43.221.159   <none>        5432/TCP                     20m
+postgresql            postgresql-hl                       ClusterIP   None            <none>        5432/TCP                     20m
+traefik               traefik                             NodePort    10.43.93.20     <none>        80:30080/TCP,443:30443/TCP   20m
+------------------------- Ingress --------------------------
+KUBECONFIG=cluster/ansible/k3s.yaml kubectl get ingress -A
+NAMESPACE   NAME       CLASS     HOSTS                    ADDRESS   PORTS     AGE
+keycloak    keycloak   traefik   keycloak.local.example             80, 443   18m
+------------------------- Keycloak HTTPS -------------------
+curl -vk https://keycloak.local.example
+* Host keycloak.local.example:443 was resolved.
+* IPv6: (none)
+* IPv4: 192.168.122.10
+*   Trying 192.168.122.10:443...
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* SSL Trust: peer verification disabled
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519MLKEM768 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: 
+*   start date: May 23 10:19:18 2026 GMT
+*   expire date: Aug 21 10:19:18 2026 GMT
+*   issuer: 
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*  SSL certificate verification failed, continuing anyway!
+* Established connection to keycloak.local.example (192.168.122.10 port 443) from 192.168.122.1 port 46016 
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://keycloak.local.example/
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: keycloak.local.example]
+* [HTTP/2] [1] [:path: /]
+* [HTTP/2] [1] [user-agent: curl/8.18.0]
+* [HTTP/2] [1] [accept: */*]
+> GET / HTTP/2
+> Host: keycloak.local.example
+> User-Agent: curl/8.18.0
+> Accept: */*
+> 
+* Request completely sent off
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+< HTTP/2 302 
+< location: https://keycloak.local.example/admin/
+< referrer-policy: no-referrer
+< strict-transport-security: max-age=31536000; includeSubDomains
+< x-content-type-options: nosniff
+< content-length: 0
+< date: Sat, 23 May 2026 10:38:14 GMT
+< 
+* Connection #0 to host keycloak.local.example:443 left intact
+
+
+
