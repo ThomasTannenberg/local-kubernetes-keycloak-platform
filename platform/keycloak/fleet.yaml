@@ -7,10 +7,6 @@ dependsOn:
       - Modified
   - name: local-keycloak-platform-platform-traefik
   - name: local-keycloak-platform-platform-secrets
-  - name: local-keycloak-platform-platform-cert-manager-issuer
-    acceptedStates:
-      - Ready
-      - Modified
 
 helm:
   releaseName: keycloak
